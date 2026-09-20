@@ -30,6 +30,7 @@ local log = import("core/logger")
 
 local CHECK_INTERVAL = 3
 local EMPTY_SLOT_TEXT = "Empty miner slot"
+local LOCKED_SLOT_TEXT = "Locked miner slot"
 local SLOT_KEYS = {
     Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three,
     Enum.KeyCode.Four, Enum.KeyCode.Five, Enum.KeyCode.Six,
@@ -59,10 +60,11 @@ local function readPlacedPower(holder)
     return nil
 end
 
--- A slot you haven't bought yet floats its price ("$14.4B") and still
--- accepts E - pressing it just gets "Not enough cash - the next miner slot
--- costs $14.4B". Enabled stays true on those, so the price tag is what
--- tells them apart from a slot that's genuinely ready for a miner.
+-- Walking up to an unbought slot shows "Locked miner slot / Unlock", so the
+-- prompt states it outright - no need to infer anything. The price tag and
+-- ActionText checks below are only fallbacks for slots we haven't seen up
+-- close, since Enabled stays true on these (pressing E there just gets
+-- "Not enough cash - the next miner slot costs $14.4B").
 local function findPriceTag(holder)
     for _, descendant in ipairs(holder:GetDescendants()) do
         if descendant:IsA("TextLabel") and descendant.Text:match("^%$") then
@@ -73,6 +75,10 @@ local function findPriceTag(holder)
 end
 
 local function isLocked(prompt, holder)
+    if prompt.ObjectText == LOCKED_SLOT_TEXT then
+        return true, "locked slot"
+    end
+
     if not prompt.Enabled then
         return true, "prompt disabled"
     end
