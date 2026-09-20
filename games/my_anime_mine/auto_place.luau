@@ -37,6 +37,14 @@ function autoPlace.SetEnabled(enabled)
 
     log("[AutoPlace] enabled")
     local lastFire = 0
+    local lastReason = nil
+
+    local function reason(text)
+        if text ~= lastReason then
+            log("[AutoPlace] " .. text)
+            lastReason = text
+        end
+    end
 
     connection = RunService.Heartbeat:Connect(function()
         local now = tick()
@@ -49,33 +57,55 @@ function autoPlace.SetEnabled(enabled)
         local character = player.Character
         local backpack = player:FindFirstChild("Backpack")
         if not character or not backpack then
+            reason("no character/backpack")
             return
         end
 
         local humanoid = character:FindFirstChildOfClass("Humanoid")
         local tool = backpack:FindFirstChildWhichIsA("Tool")
-        if not humanoid or not tool then
+        if not humanoid then
+            reason("no humanoid")
+            return
+        end
+        if not tool then
+            reason("no tool in Backpack (all miners already placed?)")
             return
         end
 
         local plot = getCurrentPlot()
         if not plot then
+            reason("not standing in any plot")
             return
         end
 
         local parts = getPlotParts(plot)
         if not parts.Holders then
+            reason("plot has no Holders folder")
             return
         end
 
+        local placed = false
         for _, holder in ipairs(parts.Holders:GetChildren()) do
             local prompt = findHolderPrompt(holder)
             if isHolderEmpty(prompt) then
                 humanoid:EquipTool(tool)
-                fireproximityprompt(prompt)
-                log("[AutoPlace] placed " .. tool.Name .. " on " .. holder.Name)
+                local ok, err = pcall(function()
+                    fireproximityprompt(prompt, Enum.ProximityPromptInputType.Keyboard, prompt.HoldDuration)
+                end)
+                if ok then
+                    log("[AutoPlace] placed " .. tool.Name .. " on " .. holder.Name)
+                else
+                    log("[AutoPlace] fireproximityprompt error: " .. tostring(err))
+                end
+                placed = true
                 break
             end
+        end
+
+        if not placed then
+            reason("no empty holder found (" .. #parts.Holders:GetChildren() .. " holders checked)")
+        else
+            lastReason = nil
         end
     end)
 end
