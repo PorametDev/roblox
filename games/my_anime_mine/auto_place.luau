@@ -25,17 +25,17 @@ local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
 local getPlotParts = import("games/my_anime_mine/get_plot_parts")
 local getMinerSlots = import("games/my_anime_mine/get_best_miner")(import)
 local teleport = import("core/teleport")
-local click = import("core/click")
+local gameApi = import("games/my_anime_mine/game_api")(import)
 local log = import("core/logger")
 
 local checkInterval = 3
 local EMPTY_SLOT_TEXT = "Empty miner slot"
 local LOCKED_SLOT_TEXT = "Locked miner slot"
-local SLOT_KEYS = {
-    Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three,
-    Enum.KeyCode.Four, Enum.KeyCode.Five, Enum.KeyCode.Six,
-    Enum.KeyCode.Seven, Enum.KeyCode.Eight, Enum.KeyCode.Nine,
-}
+-- Placing itself has no remote of its own - the holder's ProximityPrompt
+-- is handled server-side - so this still teleports and fires the prompt.
+-- Holding a miner does though: MineEquipSlot takes the hotbar slot number,
+-- which beats simulating a number-key press.
+local upgradeWeakMiners = true
 
 local function findHolderPrompt(holder)
     local pad = holder:FindFirstChild("Pad")
@@ -198,7 +198,7 @@ local function findNextAction()
         return "fill", survey.empty[1], candidates[1]
     end
 
-    local weakest = survey.occupied[1]
+    local weakest = upgradeWeakMiners and survey.occupied[1] or nil
     if weakest and candidates[1].power > weakest.power then
         return "upgrade", weakest, candidates[1]
     end
@@ -249,6 +249,12 @@ function autoPlace.SetCheckInterval(seconds)
     checkInterval = math.max(seconds, 1)
 end
 
+-- Off means only fill empty holders and leave whatever is already placed
+-- alone, however weak it is.
+function autoPlace.SetUpgradeWeakMiners(state)
+    upgradeWeakMiners = state
+end
+
 -- Tells the scheduler whether the plot still needs attention, so Auto Sell
 -- doesn't get a turn until every holder is filled and upgraded.
 function autoPlace.HasWork()
@@ -274,12 +280,7 @@ end
 -- "Place <name>" is the game confirming it sees the held miner. Pressing E
 -- before that does nothing.
 local function holdMiner(prompt, miner)
-    local key = SLOT_KEYS[miner.slot]
-    if not key then
-        return false
-    end
-
-    click.Key(key)
+    gameApi.EquipSlot(miner.slot)
 
     for _ = 1, 8 do
         task.wait(0.1)

@@ -39,6 +39,15 @@ return function(import)
         apply(saved)
     end
 
+    local function persistentSegmented(tab, options, values, key, default, apply)
+        local savedIndex = config.Get(key, default)
+        tab:AddSegmented(options, savedIndex, function(index)
+            config.Set(key, index)
+            apply(values[index])
+        end)
+        apply(values[savedIndex] or values[default])
+    end
+
     local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
     local getPlotParts = import("games/my_anime_mine/get_plot_parts")
     local dumpInstance = import("games/my_anime_mine/debug_dump")
@@ -98,6 +107,11 @@ return function(import)
     ), "autoPlace", autoPlace.SetEnabled)
     persistentSlider(farmTab, "Auto Place: รอบเช็ค", "เช็คช่องว่าง/ตัวที่ควรเปลี่ยนทุกกี่วินาที",
         1, 60, "autoPlaceInterval", 3, autoPlace.SetCheckInterval, "s")
+    persistentToggle(
+        farmTab:AddCard("Auto Place: เปลี่ยนตัวอ่อนออก",
+            "ปิด = เติมเฉพาะช่องว่าง ไม่ยุ่งกับตัวที่วางอยู่แล้ว"),
+        "autoPlaceUpgradeWeak", autoPlace.SetUpgradeWeakMiners
+    )
 
     persistentToggle(farmTab:AddCard(
         "Auto Chest",
@@ -123,6 +137,17 @@ return function(import)
         5, 300, "autoUpgradeInterval", 20, autoUpgrade.SetInterval, "s")
     persistentSlider(farmTab, "Auto Upgrade: ซื้อสูงสุดต่อรอบ", "กันไม่ให้ใช้เงินหมดในรอบเดียว",
         1, 20, "autoUpgradeMaxPerPass", 5, autoUpgrade.SetMaxPerPass, "x")
+    persistentSegmented(
+        farmTab,
+        { "ต่ำสุดก่อน", "Damage", "Speed", "Mining" },
+        { "lowest", "Damage", "Speed", "MineSpeed" },
+        "autoUpgradePriority", 1, autoUpgrade.SetPriority
+    )
+    persistentToggle(
+        farmTab:AddCard("Auto Upgrade: ซื้อ Pickaxe ด้วย",
+            "อัปเกรด pickaxe ไปเทียร์ถัดไปเมื่อเงินพอ"),
+        "autoUpgradePickaxe", autoUpgrade.SetBuyPickaxe
+    )
 
     persistentToggle(farmTab:AddCard(
         "Auto Research (Plot)",

@@ -11,6 +11,7 @@
 --   Hold a miner    SendEvent("MineEquipSlot", key)
 --   Buy research    SendEvent("MineBuySkill", nodeId, family)
 --   Upgrade a unit  SendEvent("MineUpgradeCharacter", key, stat)
+--   Buy a pickaxe   SendEvent("MineBuyPickaxe", tierIndex)
 --
 -- The same dump also explained a long-standing mystery: the game binds its
 -- buttons to MouseButton1Down, not Activated, which is why
@@ -134,6 +135,10 @@ end
 
 function api.EquipSlot(key)
     return send("MineEquipSlot", key)
+end
+
+function api.BuyPickaxe(tierIndex)
+    return send("MineBuyPickaxe", tierIndex)
 end
 
 function api.BuySkill(nodeId, family)

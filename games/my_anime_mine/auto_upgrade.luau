@@ -32,6 +32,11 @@ local STATS = {
 
 local checkInterval = 20
 local maxPerPass = 5
+-- "lowest" keeps a miner's three stats level with each other; the others
+-- pour everything into one, which is what you want when a specific stat is
+-- the bottleneck.
+local priority = "lowest"
+local buyPickaxe = true
 
 local autoUpgrade = {}
 local enabled = false
@@ -62,6 +67,15 @@ function autoUpgrade.SetMaxPerPass(count)
     maxPerPass = math.max(count, 1)
 end
 
+-- "lowest" | "Damage" | "Speed" | "MineSpeed"
+function autoUpgrade.SetPriority(value)
+    priority = value
+end
+
+function autoUpgrade.SetBuyPickaxe(state)
+    buyPickaxe = state
+end
+
 local function holders()
     local mine = gameApi.GetMineData()
     return mine and mine.Holders or {}
@@ -72,9 +86,17 @@ local function levelOf(holderKey, field)
     return entry and entry[field] or nil
 end
 
--- Upgrades whichever stat is currently lowest, so a miner's three stats
--- climb together rather than one racing ahead.
-local function weakestStat(entry)
+local function chooseStat(entry)
+    if priority ~= "lowest" then
+        for _, stat in ipairs(STATS) do
+            if stat.event == priority and entry[stat.field] then
+                return { event = stat.event, field = stat.field, level = entry[stat.field] }
+            end
+        end
+    end
+
+    -- Lowest first, so a miner's three stats climb together rather than one
+    -- racing ahead.
     local lowest = nil
     for _, stat in ipairs(STATS) do
         local level = entry[stat.field]
@@ -83,6 +105,27 @@ local function weakestStat(entry)
         end
     end
     return lowest
+end
+
+-- The pickaxe is bought by tier index, and PickaxeTier in the state says
+-- which one we're on, so the next one is simply the one after it.
+local function tryPickaxe()
+    local mine = gameApi.GetMineData()
+    local tier = mine and mine.PickaxeTier
+    if not tier then
+        return false
+    end
+
+    gameApi.BuyPickaxe(tier + 1)
+    task.wait(0.4)
+
+    local after = gameApi.GetMineData()
+    if after and (after.PickaxeTier or tier) > tier then
+        log("[AutoUpgrade] pickaxe tier " .. tier .. " -> " .. after.PickaxeTier)
+        return true
+    end
+
+    return false
 end
 
 local function runJob()
@@ -94,7 +137,7 @@ local function runJob()
             break
         end
 
-        local stat = weakestStat(entry)
+        local stat = chooseStat(entry)
         if stat then
             gameApi.UpgradeCharacter(holderKey, stat.event)
             task.wait(0.4)
@@ -106,6 +149,10 @@ local function runJob()
                 bought = bought + 1
             end
         end
+    end
+
+    if buyPickaxe and enabled and bought < maxPerPass and tryPickaxe() then
+        bought = bought + 1
     end
 
     if bought == 0 then
