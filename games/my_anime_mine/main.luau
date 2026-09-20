@@ -48,6 +48,8 @@ return function(import)
     local dumpChest = import("games/my_anime_mine/debug_dump_chest")(import)
     local inspectHandlers = import("games/my_anime_mine/debug_inspect_handlers")(import)
     local probeEnv = import("games/my_anime_mine/debug_probe_env")(import)
+    local dumpState = import("games/my_anime_mine/debug_dump_state")(import)
+    local humanoid = import("core/humanoid")
     local autoMine = import("games/my_anime_mine/auto_mine")(import)
     local autoPlace = import("games/my_anime_mine/auto_place")(import)
     local autoChest = import("games/my_anime_mine/auto_chest")(import)
@@ -292,6 +294,39 @@ return function(import)
         probeBtn.Text = "Done"
     end)
 
+    local stateCard = debugTab:AddCard(
+        "Debug: Dump Game State",
+        "พิมพ์โครงสร้าง GameState.GetData2().MineGame เพื่อหา key ที่ remote ต้องใช้"
+    )
+    local stateBtn
+    stateBtn = stateCard:AddButton("Dump", function()
+        dumpState()
+        stateBtn.Text = "Done"
+    end)
+
+    -- Movement helpers live in core because nothing about them is specific
+    -- to this game; they sit in the debug tab since they're the most
+    -- visible thing the hub can do.
+    humanoid.Start()
+
+    persistentSlider(debugTab, "ความเร็ววิ่ง", "WalkSpeed (ปกติ 16)",
+        8, 200, "walkSpeed", 16, humanoid.SetWalkSpeed, "")
+    persistentSlider(debugTab, "แรงกระโดด", "JumpPower (ปกติ 50)",
+        30, 300, "jumpPower", 50, humanoid.SetJumpPower, "")
+
+    persistentToggle(
+        debugTab:AddCard("บิน (Fly)", "บินด้วย WASD + Space/Ctrl ตามทิศกล้อง"),
+        "fly", humanoid.SetFlying
+    )
+    persistentToggle(
+        debugTab:AddCard("มุดแมพ (Noclip)", "เดินทะลุกำแพงและพื้น"),
+        "noclip", humanoid.SetNoclip
+    )
+    persistentToggle(
+        debugTab:AddCard("ลอย (Float)", "ล็อกความสูงไว้ที่ระดับปัจจุบัน"),
+        "float", humanoid.SetFloating
+    )
+
     local settingsTab = window:AddTab("ตั้งค่า", "⚙")
 
     persistentToggle(
@@ -330,5 +365,6 @@ return function(import)
         autoSell.SetEnabled(false)
         autoUpgrade.SetEnabled(false)
         autoResearch.SetEnabled(false)
+        humanoid.Stop()
     end)
 end
