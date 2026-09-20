@@ -3,6 +3,7 @@ return function(import)
     local createWindow = import("core/ui")(import)
     local i18n = import("core/i18n")
     local antiAfk = import("core/anti_afk")(import)
+    local remoteSpy = import("core/remote_spy")(import)
     local log = import("core/logger")
 
     local window = createWindow({
@@ -131,6 +132,12 @@ return function(import)
     settingsTab:AddCard("Anti-AFK", "ป้องกันถูกเตะออกจากห้องเวลาไม่ได้ขยับตัว"):AddToggle(false, function(state)
         antiAfk.SetEnabled(state)
     end)
+    settingsTab:AddCard(
+        "Remote Spy (debug)",
+        "เปิดแล้วไปกดของในเกม (เปิด chest, Take All) ทุก RemoteEvent/Function ที่ยิงจะถูกบันทึกลง MekPro.log"
+    ):AddToggle(false, function(state)
+        remoteSpy.SetEnabled(state)
+    end)
     settingsTab:AddSlider("ขนาดเมนู", "ย่อขยายเมนูทั้งชุด", 50, 150, 100, function(value)
         window:SetScale(value)
     end)
@@ -148,5 +155,6 @@ return function(import)
         autoTakeChest.SetEnabled(false)
         autoOpenChest.SetEnabled(false)
         antiAfk.SetEnabled(false)
+        remoteSpy.SetEnabled(false)
     end)
 end
