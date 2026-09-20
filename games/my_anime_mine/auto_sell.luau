@@ -24,7 +24,11 @@ local teleport = import("core/teleport")
 local click = import("core/click")
 local log = import("core/logger")
 
-local CHECK_INTERVAL = 3
+-- Unlike the chest there's no world-side indicator of what's sellable, so
+-- this one does have to open the menu to find out. Keep that rare: ore
+-- piles up slowly and a sale every 45s is plenty, whereas every 3s meant
+-- teleporting the player off their plot constantly.
+local CHECK_INTERVAL = 45
 -- Once everything sellable is gone, the leftovers (equipped units and the
 -- like) can't be selected at all, so Select All does nothing and the Sell
 -- label never shows a price. That's a normal state, not a failure - back

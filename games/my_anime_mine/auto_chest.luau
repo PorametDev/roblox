@@ -1,11 +1,14 @@
--- Restructured into a single one-shot job instead of a per-tick state
--- machine: check the condition (>= MIN_ITEMS_TO_COLLECT) FIRST, before
--- teleporting or opening anything. Only if it's met do we teleport, open
--- the chest, click Take All once, and teleport back - the whole thing runs
--- to completion as one job instead of repeatedly re-clicking every tick
--- while the frame stays open. core/turn_scheduler calls Step() often, but
--- a new job only starts every CHECK_INTERVAL and while `busy` is true every
--- call until the current job finishes is a no-op.
+-- The chest's own billboard in the world (Chest.ChestBase.ChestLabel.BG.
+-- Amount, reading e.g. "16/3,600") carries the live count the server
+-- replicates, so the condition is checked silently from the client - no
+-- teleport, no popup - and we only disturb the player at all once it's
+-- actually worth collecting.
+--
+-- Once the threshold is met the whole collect runs as a single one-shot
+-- job: teleport, open, click Take All, verify the count dropped, teleport
+-- back. core/turn_scheduler calls Step() often, but a new job only starts
+-- every CHECK_INTERVAL, and while `busy` is true every call - from any
+-- task - is a no-op, so nothing teleports the character mid-job.
 --
 -- The item count previously never actually went down after clicking
 -- TakeButton: the server checks the player's REAL position for the collect
@@ -34,13 +37,26 @@ local function getTakeButton(chestFrame)
     return actions and actions:FindFirstChild("TakeButton")
 end
 
+local function parseCount(text)
+    local digits = tostring(text):gsub(",", ""):match("^(%d+)")
+    return tonumber(digits)
+end
+
+-- Reads the count off the chest's world billboard ("16/3,600"). Available
+-- at any time, so the threshold can be checked without opening anything.
+local function getChestCount()
+    local plot = getCurrentPlot()
+    local parts = plot and getPlotParts(plot)
+    local chest = parts and parts.Chest
+    local amount = chest and chest:FindFirstChild("Amount", true)
+    return amount and parseCount(amount.Text)
+end
+
 local function getItemCount(chestFrame)
     local content = chestFrame:FindFirstChild("Content")
     local progress = content and content:FindFirstChild("Progress")
     local label = progress and progress:FindFirstChild("Label")
-    local text = label and label.Text or ""
-    local digits = text:gsub(",", ""):match("^(%d+)")
-    return tonumber(digits)
+    return parseCount(label and label.Text or "")
 end
 
 -- Real mouse click rather than firesignal: firesignal reached our own
@@ -65,6 +81,9 @@ local autoChest = {}
 local enabled = false
 local busy = false
 local lastAttempt = 0
+-- Only log a state change, not the same "still waiting" line every few
+-- seconds forever.
+local lastReportedCount = nil
 
 function autoChest.SetEnabled(state)
     if state == enabled then
@@ -79,6 +98,7 @@ function autoChest.SetEnabled(state)
         log("[AutoChest] disabled")
     else
         lastAttempt = 0
+        lastReportedCount = nil
         log("[AutoChest] enabled (collects once >= " .. MIN_ITEMS_TO_COLLECT .. " items)")
     end
 end
@@ -132,17 +152,6 @@ local function runJob()
     end
 
     local count = getItemCount(chestFrame)
-    if count and count < MIN_ITEMS_TO_COLLECT then
-        log("[AutoChest] only " .. count .. " items, closing")
-        local closeButton = chestFrame:FindFirstChild("Close")
-        if closeButton then
-            clickButton(closeButton)
-        end
-        teleport.Return()
-        busy = false
-        return
-    end
-
     local takeButton = getTakeButton(chestFrame)
     if takeButton then
         clickButton(takeButton)
@@ -175,6 +184,27 @@ function autoChest.Step()
     end
     lastAttempt = now
 
+    -- Silent check off the world billboard. Below the threshold nothing
+    -- happens at all: no teleport, no popup, no interruption.
+    local count = getChestCount()
+    if not count then
+        if lastReportedCount ~= "unreadable" then
+            log("[AutoChest] can't read the chest billboard, is the plot loaded?")
+            lastReportedCount = "unreadable"
+        end
+        return
+    end
+
+    if count < MIN_ITEMS_TO_COLLECT then
+        if lastReportedCount ~= "waiting" then
+            log("[AutoChest] waiting: " .. count .. "/" .. MIN_ITEMS_TO_COLLECT .. " items")
+            lastReportedCount = "waiting"
+        end
+        return
+    end
+
+    lastReportedCount = nil
+    log("[AutoChest] " .. count .. " items, going to collect")
     task.spawn(runJob)
 end
 
