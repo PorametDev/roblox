@@ -1,17 +1,38 @@
--- Fires SellItems directly (found via Debug: Dump All Remotes) instead of
--- clicking SelectAllButton. Still walks up to SellStand's ProximityPrompt
--- first since that's a real world object, not a UI simulation - matches
--- what a player actually does to open the sell flow. Argument signature
--- for SellItems is unconfirmed (fired with no args here); check MekPro.log
--- for errors and whether currency actually increases.
+-- SellItems fired with no args did nothing. The GUI dump captured during a
+-- real manual sell showed the actual working flow is two button clicks:
+-- SellFrame.Content.SelectAllButton (labels flip to "Deselect All", every
+-- sellable card gets a check overlay) then SellFrame.Content.SellButton
+-- (label becomes "Sell for $X"), which produced a real "Sold for $X!" toast.
+-- We don't know SellItems' real argument, so we click those two confirmed
+-- buttons directly instead of guessing.
 return function(import)
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local log = import("core/logger")
 
-local FIRE_INTERVAL = 2
+local FIRE_INTERVAL = 3
+
+local function getSellFrame()
+    local playerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
+    local mineGui = playerGui and playerGui:FindFirstChild("MineGui")
+    local sellFrame = mineGui and mineGui:FindFirstChild("SellFrame")
+    return sellFrame and sellFrame:FindFirstChild("Content")
+end
+
+local function labelText(button)
+    local content = button:FindFirstChild("Content")
+    local label = content and content:FindFirstChild("Label")
+    return label and label.Text or ""
+end
+
+local function clickButton(button)
+    local ok, err = pcall(function()
+        firesignal(button.MouseButton1Click)
+    end)
+    return ok, err
+end
 
 local autoSell = {}
 local connection = nil
@@ -28,15 +49,13 @@ function autoSell.SetEnabled(enabled)
         return
     end
 
-    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-    local sellItems = remotes and remotes:FindFirstChild("SellItems")
-    log("[AutoSell] enabled (SellItems=" .. tostring(sellItems ~= nil) .. ")")
-
+    log("[AutoSell] enabled")
     local lastFire = 0
+    local busy = false
 
     connection = RunService.Heartbeat:Connect(function()
         local now = tick()
-        if now - lastFire < FIRE_INTERVAL then
+        if now - lastFire < FIRE_INTERVAL or busy then
             return
         end
         lastFire = now
@@ -47,14 +66,35 @@ function autoSell.SetEnabled(enabled)
             fireproximityprompt(prompt)
         end
 
-        if sellItems then
-            local ok, err = pcall(function()
-                sellItems:FireServer()
-            end)
-            if not ok then
-                log("[AutoSell] SellItems:FireServer() error: " .. tostring(err))
+        busy = true
+        task.spawn(function()
+            task.wait(0.3)
+
+            local content = getSellFrame()
+            local selectAllButton = content and content:FindFirstChild("SelectAllButton")
+            local sellButton = content and content:FindFirstChild("SellButton")
+
+            if selectAllButton and labelText(selectAllButton) == "Select All" then
+                local ok, err = clickButton(selectAllButton)
+                if ok then
+                    log("[AutoSell] clicked SelectAllButton")
+                else
+                    log("[AutoSell] SelectAllButton click error: " .. tostring(err))
+                end
+                task.wait(0.3)
             end
-        end
+
+            if sellButton and labelText(sellButton):find("Sell for", 1, true) then
+                local ok, err = clickButton(sellButton)
+                if ok then
+                    log("[AutoSell] clicked SellButton")
+                else
+                    log("[AutoSell] SellButton click error: " .. tostring(err))
+                end
+            end
+
+            busy = false
+        end)
     end)
 end
 

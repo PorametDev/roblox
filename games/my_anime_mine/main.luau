@@ -40,14 +40,14 @@ return function(import)
 
     farmTab:AddCard(
         "Auto Chest",
-        "เปิด chest แล้วเก็บของอัตโนมัติในตัวเดียว (ยิง ChestPrompt + ClaimOre/CollectAll)"
+        "เปิด chest แล้วกดปุ่ม Take All อัตโนมัติ"
     ):AddToggle(false, function(state)
         autoChest.SetEnabled(state)
     end)
 
     farmTab:AddCard(
         "Auto Sell",
-        "เดินไปกด SellStand แล้วกด SelectAllButton อัตโนมัติ (ยังไม่ยืนยันว่าขายจริงหรือแค่เลือก)"
+        "เดินไปกด SellStand แล้วกด Select All + Sell อัตโนมัติ (ยืนยันจาก log ว่าขายได้จริง)"
     ):AddToggle(false, function(state)
         autoSell.SetEnabled(state)
     end)
