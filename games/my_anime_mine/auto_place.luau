@@ -27,6 +27,7 @@ local getMinerSlots = import("games/my_anime_mine/get_best_miner")(import)
 local teleport = import("core/teleport")
 local gameApi = import("games/my_anime_mine/game_api")(import)
 local log = import("core/logger")
+local runGuarded = import("core/run_job")(import)
 
 local checkInterval = 3
 local EMPTY_SLOT_TEXT = "Empty miner slot"
@@ -404,17 +405,24 @@ function autoPlace.Step()
     lastReason = nil
     cachedAt = 0
 
+    -- Guarded: these jobs teleport and fire prompts, so a throw part-way
+    -- through is entirely possible - and an unguarded one would leave
+    -- busy set and freeze every other automation.
     if action == "fill" then
-        task.spawn(function()
+        runGuarded("AutoPlace", function()
             runFillJob(target)
+        end, function()
+            busy = false
         end)
         return
     end
 
     log("[AutoPlace] upgrading " .. target.holder.Name .. ": " .. target.name
         .. " (" .. target.power .. ") -> " .. best.name .. " (" .. best.power .. ")")
-    task.spawn(function()
+    runGuarded("AutoPlace", function()
         runUpgradeJob(target)
+    end, function()
+        busy = false
     end)
 end
 

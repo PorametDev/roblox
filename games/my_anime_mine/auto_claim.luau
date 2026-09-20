@@ -19,6 +19,7 @@ return function(import)
 
 local gameApi = import("games/my_anime_mine/game_api")(import)
 local log = import("core/logger")
+local runGuarded = import("core/run_job")(import)
 
 local checkInterval = 30
 local maxPerPass = 10
@@ -113,7 +114,11 @@ function autoClaim.Step()
         return
     end
 
-    task.spawn(runJob)
+    -- Guarded: a job that throws would otherwise leave busy set
+    -- forever, and one stuck flag blocks every exclusive task.
+    runGuarded("AutoClaim", runJob, function()
+        busy = false
+    end)
 end
 
 return autoClaim

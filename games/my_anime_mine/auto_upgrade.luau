@@ -28,6 +28,7 @@ local Workspace = game:GetService("Workspace")
 local gameApi = import("games/my_anime_mine/game_api")(import)
 local teleport = import("core/teleport")
 local log = import("core/logger")
+local runGuarded = import("core/run_job")(import)
 
 -- The screen labels these Damage / Speed / Mining; the server wants
 -- Damage / Speed / MineSpeed.
@@ -551,7 +552,11 @@ function autoUpgrade.Step()
     end
     lastAttempt = now
 
-    task.spawn(runJob)
+    -- Guarded: a job that throws would otherwise leave busy set
+    -- forever, and one stuck flag blocks every exclusive task.
+    runGuarded("AutoUpgrade", runJob, function()
+        busy = false
+    end)
 end
 
 return autoUpgrade

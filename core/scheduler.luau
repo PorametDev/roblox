@@ -89,12 +89,45 @@ local function run(task_)
     end
 end
 
+-- A job that never finishes freezes the entire hub, because one task
+-- reporting busy blocks every other task from being picked. That is not a
+-- theoretical risk - it happened:
+--
+--   05:00:15  [Scheduler] turn: AutoSell
+--             (no "sold" line, and total silence from every task)
+--   05:01:45  [Scheduler] AutoChest waited 90s - jumping the queue
+--
+-- Ninety seconds in which nothing collected, sold, upgraded or researched,
+-- which then got reported as "Auto Research isn't buying". A job either
+-- errored and left its flag set - task.spawn swallows the error and the
+-- `busy = false` line never runs - or it yielded inside a remote call and
+-- never came back. Either way one task must not be able to hold the whole
+-- scheduler hostage, so past this point its claim is simply not believed.
+local STUCK_AFTER = 25
+
 local function anyExclusiveBusy()
+    local now = tick()
+
     for _, task_ in ipairs(exclusiveTasks) do
         if task_.isBusy and task_.isBusy() then
-            return true
+            task_.busySince = task_.busySince or now
+
+            if now - task_.busySince < STUCK_AFTER then
+                return true
+            end
+
+            if not task_.reportedStuck then
+                task_.reportedStuck = true
+                log("[Scheduler] " .. task_.name .. " has been busy for "
+                    .. string.format("%.0f", now - task_.busySince)
+                    .. "s - carrying on without it")
+            end
+        else
+            task_.busySince = nil
+            task_.reportedStuck = nil
         end
     end
+
     return false
 end
 
@@ -163,9 +196,12 @@ function scheduler.Start()
         end
 
         if anyExclusiveBusy() then
-            -- A job is running; if the queue-jumper is the one that
-            -- started it, its turn has been served.
-            if starvedOverride then
+            -- Only count the turn as served if the queue-jumper is the one
+            -- that actually started a job. Someone else being busy was
+            -- letting the override lapse before it ever ran.
+            if starvedOverride and starvedOverride.isBusy
+                and starvedOverride.isBusy()
+            then
                 overrideRan = true
             end
             return

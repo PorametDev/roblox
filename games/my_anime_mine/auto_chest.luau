@@ -22,6 +22,7 @@ return function(import)
 
 local gameApi = import("games/my_anime_mine/game_api")(import)
 local log = import("core/logger")
+local runGuarded = import("core/run_job")(import)
 
 local checkInterval = 3
 local minItemsToCollect = 100
@@ -127,7 +128,9 @@ function autoChest.Step()
     lastReported = nil
     busy = true
 
-    task.spawn(function()
+    -- Guarded: a job that throws would otherwise leave busy set forever,
+    -- and one stuck flag blocks every exclusive task.
+    runGuarded("AutoChest", function()
         gameApi.TakeChest()
         task.wait(0.5)
 
@@ -138,7 +141,7 @@ function autoChest.Step()
             log("[AutoChest] MineTakeChest had no effect (" .. count
                 .. " -> " .. tostring(after) .. ")")
         end
-
+    end, function()
         busy = false
     end)
 end
