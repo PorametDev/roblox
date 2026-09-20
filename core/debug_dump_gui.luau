@@ -1,7 +1,10 @@
--- Dumps whatever GuiObjects are currently VISIBLE under MineGui (hidden
+-- Dumps whatever GuiObjects are currently VISIBLE in PlayerGui (hidden
 -- frames are skipped to cut noise). Open the screen you want to inspect
--- (chest reward popup, sell menu, etc) first, then run this - works for
--- any screen since it doesn't assume a specific frame name.
+-- first, then run this.
+--
+-- Nothing here knows which game it's in: it walks every ScreenGui the
+-- player has rather than a named one, so it's as useful on the next place
+-- as it was on this one.
 return function(import)
 
 local Players = game:GetService("Players")
@@ -29,20 +32,27 @@ local function dumpVisible(root, indent)
     end
 end
 
-local function dumpMineGui()
+local function dumpGui()
     local playerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
-    local mineGui = playerGui and playerGui:FindFirstChild("MineGui")
-
-    if not mineGui then
-        log("[GuiDump] MineGui not found")
-        return
+    if not playerGui then
+        log("[GuiDump] PlayerGui not found")
+        return 0
     end
 
-    log("[GuiDump] === visible MineGui tree ===")
-    dumpVisible(mineGui)
-    log("[GuiDump] === end ===")
+    local screens = 0
+    log("[GuiDump] === visible PlayerGui tree ===")
+    for _, screen in ipairs(playerGui:GetChildren()) do
+        -- Our own menu would otherwise dominate the dump.
+        if screen:IsA("LayerCollector") and screen.Enabled and screen.Name ~= "MekPro" then
+            screens = screens + 1
+            log("[GuiDump] " .. screen.ClassName .. " '" .. screen.Name .. "'")
+            dumpVisible(screen, "  ")
+        end
+    end
+    log("[GuiDump] === end (" .. screens .. " screen(s)) ===")
+    return screens
 end
 
-return dumpMineGui
+return dumpGui
 
 end

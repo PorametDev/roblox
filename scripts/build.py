@@ -15,13 +15,26 @@ the bundle and print the strings table gets everything back. Layer a real
 obfuscator (e.g. Prometheus, https://github.com/prometheus-lua/Prometheus)
 on top of this output for anything that actually needs to resist reversing.
 """
+import argparse
 import os
 import random
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUTPUT_PATH = os.path.join(REPO_ROOT, "dist", "out.lua")
 SCAN_DIRS = ["core", "games"]
 ENTRY_MODULE = "core/dispatch"
+
+# A dev build keeps the URL the testing loadstring already points at; a prod
+# build writes somewhere else so releasing can never silently replace the
+# build someone is mid-test on.
+OUTPUT_PATHS = {
+    "dev": os.path.join(REPO_ROOT, "dist", "out.lua"),
+    "prod": os.path.join(REPO_ROOT, "dist", "out.prod.lua"),
+}
+
+# Debug tooling is not hidden in a prod build, it is absent: these modules
+# never reach the bundle. core/debug_tab is the only thing that imports
+# them, and main.luau only imports core/debug_tab when IsDev.
+DEBUG_PREFIX = "core/debug_"
 
 # Placeholder character used to splice shuffled-string references back into
 # the code template. Not valid in Luau source, so it can't collide with
@@ -29,7 +42,7 @@ ENTRY_MODULE = "core/dispatch"
 PLACEHOLDER = "\x01"
 
 
-def collect_modules():
+def collect_modules(env):
     modules = {}
     for scan_dir in SCAN_DIRS:
         base = os.path.join(REPO_ROOT, scan_dir)
@@ -40,8 +53,18 @@ def collect_modules():
                 full_path = os.path.join(root, filename)
                 rel_path = os.path.relpath(full_path, REPO_ROOT)
                 key = rel_path.replace(os.sep, "/")[: -len(".luau")]
+                if env == "prod" and key.startswith(DEBUG_PREFIX):
+                    continue
                 with open(full_path, encoding="utf-8") as f:
                     modules[key] = f.read().rstrip("\n")
+
+    # Stamped in rather than read from disk, so the flag the bundle runs on
+    # is the flag it was built with - core/build_env.luau on disk only ever
+    # describes a local main.luau run.
+    modules["core/build_env"] = 'return { Env = "%s", IsDev = %s }' % (
+        env,
+        "true" if env == "dev" else "false",
+    )
     return modules
 
 
@@ -129,8 +152,8 @@ def shuffle_strings(template, literals):
     return header, code
 
 
-def build():
-    modules = collect_modules()
+def build(env):
+    modules = collect_modules(env)
     if ENTRY_MODULE not in modules:
         raise SystemExit(f"entry module {ENTRY_MODULE} not found")
 
@@ -144,12 +167,23 @@ def build():
     )
     output = f"{banner}\n{header}\n{code}\n"
 
-    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
-    with open(OUTPUT_PATH, "w", encoding="utf-8", newline="\n") as f:
+    output_path = OUTPUT_PATHS[env]
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w", encoding="utf-8", newline="\n") as f:
         f.write(output)
 
-    print(f"Built {OUTPUT_PATH} from {len(modules)} modules, {len(literals)} strings shuffled")
+    print(
+        f"Built {output_path} [{env}] from {len(modules)} modules, "
+        f"{len(literals)} strings shuffled"
+    )
 
 
 if __name__ == "__main__":
-    build()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--env",
+        choices=sorted(OUTPUT_PATHS),
+        default="dev",
+        help="dev (default) keeps the debug tab; prod leaves it out of the bundle",
+    )
+    build(parser.parse_args().env)

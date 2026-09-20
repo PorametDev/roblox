@@ -32,7 +32,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local log = import("core/logger")
 
 local api = {}
-local gameState, mineInventory, mineConfig
+local gameState, mineInventory, mineConfig, mineStock, items, indexRewards
 local loadFailed = false
 
 local function modules()
@@ -45,6 +45,11 @@ local function modules()
         gameState = require(moduleFolder.GameState)
         mineInventory = require(moduleFolder.MineInventory)
         mineConfig = require(moduleFolder.MineConfig)
+        -- The pickaxe shop is a rotating stock list, not a fixed catalogue,
+        -- so buying needs MineStock as much as it needs MineConfig.
+        mineStock = require(moduleFolder.MineStock)
+        items = require(moduleFolder.Items)
+        indexRewards = require(moduleFolder.MineIndexRewardsConfig)
     end)
 
     if not ok then
@@ -60,46 +65,56 @@ function api.IsReady()
     return modules()
 end
 
--- Everything the client knows about the mine: Chest contents, inventory,
--- plot state. Reading this replaces opening menus to look at things.
-function api.GetMineData()
+-- The whole player record. MineStock and the index rewards want this rather
+-- than the MineGame sub-table, so both are exposed.
+function api.GetData()
     if not modules() then
         return nil
     end
 
     local ok, data = pcall(gameState.GetData2)
-    if not ok or not data then
+    if not ok then
         return nil
     end
+    return data
+end
 
-    return data.MineGame
+-- Everything the client knows about the mine: Chest contents, inventory,
+-- plot state. Reading this replaces opening menus to look at things.
+function api.GetMineData()
+    local data = api.GetData()
+    return data and data.MineGame or nil
 end
 
 -- Money sits on Data2 itself rather than under MineGame.
 function api.GetMoney()
-    if not modules() then
-        return 0
-    end
-
-    local ok, data = pcall(gameState.GetData2)
-    if not ok or not data then
-        return 0
-    end
-
-    return tonumber(data.Money) or 0
+    local data = api.GetData()
+    return data and tonumber(data.Money) or 0
 end
 
 -- MineConfig.Pickaxes is a plain array and MineBuyPickaxe takes the array
 -- index, so position in this list IS the argument. The shop hides free,
 -- robux-only and unstocked entries, so do the same - they can't be bought
 -- with cash.
+--
+-- Three things the first version of this got wrong, all of them read back
+-- out of MineHUDClient's shop renderer:
+--
+--   * quality is Multiplier, not Cost - a later zone's cheap pickaxe can
+--     beat an earlier zone's expensive one
+--   * the shop is stocked, not a permanent catalogue: MineStock.GetRemaining
+--     decides whether the Buy button does anything at all
+--   * a pickaxe needs its ZoneReq unlocked, and MineGame.Pickaxes holds a
+--     COUNT, not a flag - you can own several of the same one
 function api.GetPickaxes()
     if not modules() then
         return {}
     end
 
-    local mine = api.GetMineData()
+    local data = api.GetData()
+    local mine = data and data.MineGame
     local owned = (mine and mine.Pickaxes) or {}
+    local unlocked = (mine and mine.UnlockedZones) or {}
     local list = {}
 
     local ok = pcall(function()
@@ -108,11 +123,24 @@ function api.GetPickaxes()
                 or def.RobuxOnly or type(def.Stock) ~= "table")
 
             if buyableWithCash then
+                local remaining = nil
+                if data then
+                    local gotStock, value = pcall(mineStock.GetRemaining, data, def.Name)
+                    remaining = gotStock and value or nil
+                end
+
+                local zoneOpen = unlocked[def.ZoneReq] and true or false
                 table.insert(list, {
                     index = index,
                     name = def.Name,
                     cost = tonumber(def.Cost) or math.huge,
-                    owned = owned[def.Name] ~= nil,
+                    multiplier = tonumber(def.Multiplier) or 1,
+                    zoneReq = def.ZoneReq,
+                    zoneUnlocked = zoneOpen,
+                    ownedCount = math.floor(tonumber(owned[def.Name]) or 0),
+                    -- nil means unlimited; the shop only blocks on <= 0.
+                    stock = remaining,
+                    inStock = (remaining == nil) or (remaining > 0),
                 })
             end
         end
@@ -123,6 +151,76 @@ function api.GetPickaxes()
     end
 
     return list
+end
+
+-- A straight port of MineHUDClient's pickaxeAlertWanted: the game itself
+-- decides "is a better pickaxe worth buying right now", and copying that
+-- beats inventing a rule.
+--
+-- It works out the WORST multiplier that would still be in use once every
+-- non-Hauler miner is holding something, then looks for a shop entry that
+-- beats it. That's why owning one great pickaxe doesn't stop it buying
+-- more: six miners need six pickaxes.
+function api.WantedPickaxe()
+    if not modules() then
+        return nil
+    end
+
+    local data = api.GetData()
+    local mine = data and data.MineGame
+    if not mine then
+        return nil
+    end
+
+    local wanted = nil
+    pcall(function()
+        local minerCount = 0
+        for _, holder in pairs(mine.Holders or {}) do
+            if type(holder) == "table" and holder.CharName then
+                local itemData = items.GetItemData(holder.CharName)
+                if itemData and itemData.MineRole ~= "Hauler" then
+                    minerCount = minerCount + 1
+                end
+            end
+        end
+
+        if minerCount <= 0 then
+            return
+        end
+
+        -- One entry per owned copy, capped at the number of miners - copies
+        -- beyond that can't be worn by anyone.
+        local inUse = {}
+        for _, def in ipairs(mineConfig.Pickaxes) do
+            if not mineConfig.IsPickaxeFree(def) then
+                local count = math.floor(tonumber((mine.Pickaxes or {})[def.Name]) or 0)
+                for _ = 1, math.min(count, minerCount) do
+                    table.insert(inUse, tonumber(def.Multiplier) or 1)
+                end
+            end
+        end
+        table.sort(inUse, function(a, b) return a > b end)
+
+        -- What the last miner ends up holding: either the weakest owned
+        -- pickaxe that still gets worn, or the free starter one.
+        local weakestInUse = minerCount <= #inUse
+            and inUse[minerCount]
+            or (tonumber(mineConfig.Pickaxes[1].Multiplier) or 1)
+
+        local money = tonumber(data.Money) or 0
+        for _, pickaxe in ipairs(api.GetPickaxes()) do
+            if pickaxe.zoneUnlocked and pickaxe.inStock
+                and pickaxe.multiplier > weakestInUse
+                and pickaxe.cost <= money
+            then
+                if not wanted or pickaxe.multiplier > wanted.multiplier then
+                    wanted = pickaxe
+                end
+            end
+        end
+    end)
+
+    return wanted
 end
 
 function api.ChestCount()
@@ -217,13 +315,222 @@ function api.BestOwnedPickaxe()
     return best
 end
 
-function api.BuySkill(nodeId, family)
-    return send("MineBuySkill", nodeId, family)
+function api.BuySkill(zoneKey, family)
+    return send("MineBuySkill", zoneKey, family)
+end
+
+-- The research tree is not "a zone has families you can pour money into".
+-- MineSkillTreeClient's buy button refuses unless the specific NODE is both
+-- open (its parents are done) and not maxed - and a family spans several
+-- nodes down the tree. Sending a family name with no open node just gets
+-- dropped, which is why blind buying looked like it did nothing.
+function api.ZoneKeys()
+    if not modules() then
+        return {}
+    end
+    local ok, keys = pcall(function() return mineConfig.ZoneKeys end)
+    return (ok and type(keys) == "table") and keys or {}
+end
+
+function api.UnlockedZones()
+    local mine = api.GetMineData()
+    local unlocked = mine and mine.UnlockedZones or {}
+
+    local list = {}
+    for _, zoneKey in ipairs(api.ZoneKeys()) do
+        if unlocked[zoneKey] then
+            table.insert(list, zoneKey)
+        end
+    end
+    return list
+end
+
+-- Every node the tree can show for a zone, annotated with the three things
+-- that decide whether buying it will work.
+function api.SkillNodes(zoneKey)
+    if not modules() then
+        return {}
+    end
+
+    local mine = api.GetMineData()
+    local skills = (mine and mine.Skills and mine.Skills[zoneKey]) or {}
+    local list = {}
+
+    pcall(function()
+        for _, node in ipairs(mineConfig.GetSkillNodes(zoneKey) or {}) do
+            local level = tonumber(skills[node.Family]) or 0
+            local max = tonumber(mineConfig.GetSkillMax(zoneKey, node.Family)) or 0
+            local cost = nil
+            if level < max then
+                cost = tonumber(mineConfig.GetSkillCost(zoneKey, level, node.Family))
+            end
+
+            table.insert(list, {
+                zoneKey = zoneKey,
+                id = node.Id,
+                family = node.Family,
+                row = node.Row or 0,
+                col = node.Col or 0,
+                level = level,
+                max = max,
+                cost = cost,
+                maxed = mineConfig.IsSkillNodeMaxed(skills, node) and true or false,
+                open = mineConfig.IsSkillNodeOpen(skills, node) and true or false,
+            })
+        end
+    end)
+
+    return list
+end
+
+-- The Core tab is a separate tree with a separate remote per upgrade -
+-- MineConfig.CoreUpgradeById[family].Event, sent with no arguments at all.
+function api.CoreNodes()
+    if not modules() then
+        return {}
+    end
+
+    local mine = api.GetMineData()
+    if not mine then
+        return {}
+    end
+
+    local list = {}
+    pcall(function()
+        for _, node in ipairs(mineConfig.CoreNodes or {}) do
+            local upgrade = mineConfig.CoreUpgradeById[node.Family]
+            local level = tonumber(mineConfig.GetCoreLevel(mine, node.Family)) or 0
+            local cost = nil
+            if upgrade and type(upgrade.Cost) == "function" then
+                local ok, value = pcall(upgrade.Cost, level)
+                cost = ok and tonumber(value) or nil
+            end
+
+            table.insert(list, {
+                id = node.Id,
+                family = node.Family,
+                row = node.Row or 0,
+                level = level,
+                cost = cost,
+                event = upgrade and upgrade.Event or nil,
+                maxed = mineConfig.IsCoreNodeMaxed(mine, node) and true or false,
+                open = mineConfig.IsCoreNodeOpen(mine, node) and true or false,
+            })
+        end
+    end)
+
+    return list
+end
+
+function api.BuyCore(eventName)
+    return send(eventName)
 end
 
 -- The unit screen labels the stat "Mining" but sends "MineSpeed".
 function api.UpgradeCharacter(characterKey, stat)
     return send("MineUpgradeCharacter", characterKey, stat == "Mining" and "MineSpeed" or stat)
+end
+
+-- What the unit screen prints on each upgrade button: the current level,
+-- the cap, and the price of the next one. Having the real price means
+-- "nothing happened" can be reported as "too expensive" or "maxed out"
+-- instead of guessing, and stops money being thrown at a maxed stat.
+local STAT_FIELDS = {
+    Damage = { level = "GetHolderLevel", max = "CharMaxLevel", cost = "GetCharacterUpgradeCost" },
+    Speed = { level = "GetHolderSpeedLevel", max = "CharSpeedMaxLevel", cost = "GetCharacterSpeedUpgradeCost" },
+    MineSpeed = { level = "GetHolderMineSpeedLevel", max = "CharMineSpeedMaxLevel", cost = "GetCharacterMineSpeedUpgradeCost" },
+}
+
+function api.StatInfo(holderKey, stat)
+    if not modules() then
+        return nil
+    end
+
+    local field = STAT_FIELDS[stat]
+    local mine = api.GetMineData()
+    local holder = mine and (mine.Holders or {})[holderKey]
+    if not (field and holder and holder.CharName) then
+        return nil
+    end
+
+    local info = nil
+    pcall(function()
+        local itemData = items.GetItemData(holder.CharName)
+        if not itemData then
+            return
+        end
+
+        local level = tonumber(mineConfig[field.level](holder)) or 0
+        local max = tonumber(mineConfig[field.max]) or 0
+        info = {
+            level = level,
+            max = max,
+            maxed = level >= max,
+            cost = level < max
+                and tonumber(mineConfig[field.cost](level, itemData))
+                or nil,
+        }
+    end)
+
+    return info
+end
+
+-- MineConfig.GetMutationRollCost(item, mineGame) - the number the Roll
+-- button shows. This was the missing piece that kept mutation rolling
+-- switched off by default.
+function api.MutationRollCost(holderKey)
+    if not modules() then
+        return nil
+    end
+
+    local mine = api.GetMineData()
+    local holder = mine and (mine.Holders or {})[holderKey]
+    if not (holder and holder.CharName) then
+        return nil
+    end
+
+    local ok, cost = pcall(function()
+        return tonumber(mineConfig.GetMutationRollCost(items.GetItemData(holder.CharName), mine))
+    end)
+    return ok and cost or nil
+end
+
+-- How good a holder's current mutation is, so a reroll can be aimed at
+-- improving it rather than fired blindly.
+function api.HolderVariantMult(holderKey)
+    if not modules() then
+        return 1
+    end
+
+    local mine = api.GetMineData()
+    local holder = mine and (mine.Holders or {})[holderKey]
+    if not holder then
+        return 1
+    end
+
+    local ok, mult = pcall(function()
+        return tonumber(mineConfig.GetVariantMult(mineConfig.GetHolderVariant(holder)))
+    end)
+    return (ok and mult) or 1
+end
+
+-- MineIndexRewardsConfig.ClaimableTiers is what drives the red badge on the
+-- Index button; .Total is the number waiting to be collected.
+function api.ClaimableIndexTiers()
+    if not modules() then
+        return 0
+    end
+
+    local mine = api.GetMineData()
+    if not mine then
+        return 0
+    end
+
+    local ok, result = pcall(indexRewards.ClaimableTiers, mine)
+    if not ok or type(result) ~= "table" then
+        return 0
+    end
+    return tonumber(result.Total) or 0
 end
 
 return api

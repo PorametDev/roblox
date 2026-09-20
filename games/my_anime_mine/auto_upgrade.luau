@@ -6,29 +6,30 @@
 -- and the state dump showed the holder key is simply the holder's name,
 -- with each one's levels sitting right there:
 --
---   Holders.M1 = { CharName, CharLevel, CharSpeedLevel, CharMineSpeedLevel }
+--   Holders.M1 = { CharName, CharLevel, CharSpeedLevel, CharMineSpeedLevel, Pickaxe }
 --
 -- So no teleporting to a holder, no opening the unit screen, no clicking
--- through three tabs - read the levels, send the event, confirm the level
--- moved.
+-- through three tabs.
 --
--- Prices aren't in the state table, so instead of a money cap this stops
--- as soon as a level fails to rise: that covers both "maxed out" and
--- "can't afford it" without having to know the cost. maxPerPass keeps one
--- pass from spending everything the moment a sale lands.
+-- This used to fire at a stat and see whether the level moved, which meant
+-- it couldn't tell "maxed out" from "can't afford it" and kept poking both
+-- forever. MineConfig hands over both numbers the button itself uses -
+-- CharMaxLevel / CharSpeedMaxLevel / CharMineSpeedMaxLevel for the cap, and
+-- GetCharacter*UpgradeCost for the price - so a stat is now skipped before
+-- any remote goes out, and the log says which reason applied.
+--
+-- The pickaxe half follows MineHUDClient's own pickaxeAlertWanted rule (see
+-- game_api.WantedPickaxe): quality is Multiplier, the shop is stocked and
+-- restocks, and MineGame.Pickaxes holds counts because six miners need six
+-- pickaxes.
 return function(import)
 
 local gameApi = import("games/my_anime_mine/game_api")(import)
 local log = import("core/logger")
 
 -- The screen labels these Damage / Speed / Mining; the server wants
--- Damage / Speed / MineSpeed, and the state stores them as CharLevel /
--- CharSpeedLevel / CharMineSpeedLevel.
-local STATS = {
-    { event = "Damage", field = "CharLevel" },
-    { event = "Speed", field = "CharSpeedLevel" },
-    { event = "MineSpeed", field = "CharMineSpeedLevel" },
-}
+-- Damage / Speed / MineSpeed.
+local STATS = { "Damage", "Speed", "MineSpeed" }
 
 local checkInterval = 20
 local maxPerPass = 5
@@ -36,14 +37,16 @@ local maxPerPass = 5
 -- pour everything into one, which is what you want when a specific stat is
 -- the bottleneck.
 local priority = "lowest"
+local keepMoney = 0
 local buyPickaxe = true
--- 0 means "work it out": buy the most expensive one we don't own yet and
--- can actually afford, which is the best available upgrade.
+-- 0 means "work it out": follow the game's own wanted-pickaxe rule.
 local pickaxeTarget = 0
 local equipPickaxes = true
--- Off by default: rolling costs something, and nothing in the state says
--- what, so this shouldn't start spending on its own.
+-- Now that GetMutationRollCost is known this can be switched on safely, but
+-- it still spends money on a gamble, so it stays off until asked for.
 local rollMutations = false
+local mutationTarget = 2
+local mutationBudget = 0
 
 local autoUpgrade = {}
 local enabled = false
@@ -79,6 +82,10 @@ function autoUpgrade.SetPriority(value)
     priority = value
 end
 
+function autoUpgrade.SetKeepMoney(amount)
+    keepMoney = math.max(amount, 0)
+end
+
 function autoUpgrade.SetBuyPickaxe(state)
     buyPickaxe = state
 end
@@ -95,61 +102,138 @@ function autoUpgrade.SetRollMutations(state)
     rollMutations = state
 end
 
+-- Stop rolling a holder once its variant is at least this good, so a lucky
+-- roll isn't immediately thrown away by the next pass.
+function autoUpgrade.SetMutationTarget(multiplier)
+    mutationTarget = math.max(multiplier, 1)
+end
+
+-- Hard ceiling on a single roll, since the price climbs with the unit.
+function autoUpgrade.SetMutationBudget(amount)
+    mutationBudget = math.max(amount, 0)
+end
+
 local function holders()
     local mine = gameApi.GetMineData()
     return mine and mine.Holders or {}
 end
 
-local function levelOf(holderKey, field)
-    local entry = holders()[holderKey]
-    return entry and entry[field] or nil
+-- Sorted, so passes are reproducible and the log reads the same way twice.
+local function holderKeys()
+    local keys = {}
+    for holderKey, entry in pairs(holders()) do
+        if type(entry) == "table" and entry.CharName then
+            table.insert(keys, holderKey)
+        end
+    end
+    table.sort(keys)
+    return keys
 end
 
-local function chooseStat(entry)
-    if priority ~= "lowest" then
-        for _, stat in ipairs(STATS) do
-            if stat.event == priority and entry[stat.field] then
-                return { event = stat.event, field = stat.field, level = entry[stat.field] }
+local function spendable()
+    return gameApi.GetMoney() - keepMoney
+end
+
+-- Returns the stat to buy next for this holder, or nil plus the reason.
+local function chooseStat(holderKey)
+    local budget = spendable()
+    local anyLeft = false
+    local best = nil
+
+    for _, stat in ipairs(STATS) do
+        local info = gameApi.StatInfo(holderKey, stat)
+        if info and not info.maxed and info.cost then
+            anyLeft = true
+            if info.cost <= budget then
+                if priority ~= "lowest" then
+                    if stat == priority then
+                        return { stat = stat, info = info }
+                    end
+                elseif not best or info.level < best.info.level then
+                    best = { stat = stat, info = info }
+                end
             end
         end
     end
 
-    -- Lowest first, so a miner's three stats climb together rather than one
-    -- racing ahead.
-    local lowest = nil
-    for _, stat in ipairs(STATS) do
-        local level = entry[stat.field]
-        if level and (not lowest or level < lowest.level) then
-            lowest = { event = stat.event, field = stat.field, level = level }
+    if best then
+        return best
+    end
+    return nil, anyLeft and "cost" or "maxed"
+end
+
+local function upgradeStats()
+    local bought = 0
+    local tooExpensive = 0
+    local maxed = 0
+
+    -- One stat per holder per lap, so every miner gets a turn before any
+    -- miner gets a second one.
+    while enabled and bought < maxPerPass do
+        local boughtThisLap = 0
+
+        for _, holderKey in ipairs(holderKeys()) do
+            if not enabled or bought >= maxPerPass then
+                break
+            end
+
+            local choice, reason = chooseStat(holderKey)
+            if choice then
+                gameApi.UpgradeCharacter(holderKey, choice.stat)
+                task.wait(0.35)
+
+                local after = gameApi.StatInfo(holderKey, choice.stat)
+                if after and after.level > choice.info.level then
+                    log("[AutoUpgrade] " .. holderKey .. " " .. choice.stat .. " "
+                        .. choice.info.level .. " -> " .. after.level
+                        .. "/" .. after.max)
+                    bought = bought + 1
+                    boughtThisLap = boughtThisLap + 1
+                end
+            elseif reason == "cost" then
+                tooExpensive = tooExpensive + 1
+            else
+                maxed = maxed + 1
+            end
+        end
+
+        if boughtThisLap == 0 then
+            break
         end
     end
-    return lowest
+
+    return bought, tooExpensive, maxed
 end
 
 local function findPickaxe()
-    local pickaxes = gameApi.GetPickaxes()
-
     if pickaxeTarget > 0 then
-        for _, pickaxe in ipairs(pickaxes) do
-            if pickaxe.index == pickaxeTarget and not pickaxe.owned then
-                return pickaxe
+        for _, pickaxe in ipairs(gameApi.GetPickaxes()) do
+            if pickaxe.index == pickaxeTarget then
+                if pickaxe.zoneUnlocked and pickaxe.inStock
+                    and pickaxe.cost <= spendable()
+                then
+                    return pickaxe
+                end
+                return nil
             end
         end
         return nil
     end
 
-    -- Most expensive affordable one we don't own: cost tracks quality, so
-    -- that's the best upgrade available right now.
-    local money = gameApi.GetMoney()
-    local best = nil
-    for _, pickaxe in ipairs(pickaxes) do
-        if not pickaxe.owned and pickaxe.cost <= money then
-            if not best or pickaxe.cost > best.cost then
-                best = pickaxe
-            end
+    local wanted = gameApi.WantedPickaxe()
+    if wanted and wanted.cost <= spendable() then
+        return wanted
+    end
+    return nil
+end
+
+local function ownedCountOf(name)
+    for _, pickaxe in ipairs(gameApi.GetPickaxes()) do
+        if pickaxe.name == name then
+            return pickaxe.ownedCount
         end
     end
-    return best
+    return 0
 end
 
 local function tryPickaxe()
@@ -158,86 +242,119 @@ local function tryPickaxe()
         return false
     end
 
+    local before = pickaxe.ownedCount
     gameApi.BuyPickaxe(pickaxe.index)
     task.wait(0.4)
 
-    for _, current in ipairs(gameApi.GetPickaxes()) do
-        if current.index == pickaxe.index and current.owned then
-            log("[AutoUpgrade] bought pickaxe #" .. pickaxe.index .. " " .. pickaxe.name)
-            return true
-        end
+    if ownedCountOf(pickaxe.name) > before then
+        log("[AutoUpgrade] bought pickaxe #" .. pickaxe.index .. " " .. pickaxe.name
+            .. " (x" .. pickaxe.multiplier .. ")")
+        return true
     end
 
+    log("[AutoUpgrade] pickaxe #" .. pickaxe.index .. " " .. pickaxe.name
+        .. " didn't go through (out of stock or too expensive)")
     return false
 end
 
--- Holder entries carry the pickaxe's name in .Pickaxe, so what's equipped
--- is readable rather than something we have to remember.
---
--- Handed out best-first with no repeats: the unit screen counts how many
--- other holders wear the same pickaxe (wornBy), so the game clearly cares
--- about sharing one. Spreading them is right either way - if sharing is
--- allowed, each miner still ends up with the best one left.
+-- Hand out the strongest pickaxes first, one copy per holder. Copies
+-- matter: MineGame.Pickaxes stores a count, so owning two of the same
+-- pickaxe really does let two miners hold it, and the unit screen's
+-- wornBy() exists precisely to show that.
 local function equipPickaxesBestFirst()
-    local owned = {}
+    local pool = {}
     for _, pickaxe in ipairs(gameApi.GetPickaxes()) do
-        if pickaxe.owned then
-            table.insert(owned, pickaxe)
+        for _ = 1, pickaxe.ownedCount do
+            table.insert(pool, pickaxe)
         end
     end
 
-    if #owned == 0 then
+    if #pool == 0 then
         return
     end
 
-    table.sort(owned, function(a, b)
-        return a.cost > b.cost
+    -- By Multiplier, not Cost: a later zone's cheap pickaxe can beat an
+    -- earlier zone's expensive one.
+    table.sort(pool, function(a, b)
+        if a.multiplier ~= b.multiplier then
+            return a.multiplier > b.multiplier
+        end
+        return a.name < b.name
     end)
 
-    local holderKeys = {}
-    for holderKey in pairs(holders()) do
-        table.insert(holderKeys, holderKey)
-    end
-    table.sort(holderKeys)
+    local keys = holderKeys()
 
-    for position, holderKey in ipairs(holderKeys) do
-        local wanted = owned[position]
-        if not wanted then
-            break
+    -- Anything already correctly placed is left alone and its copy taken
+    -- out of the pool, so a full pass with nothing to change sends nothing.
+    local remaining = {}
+    local settled = {}
+    local current = holders()
+
+    for _, pickaxe in ipairs(pool) do
+        local claimed = false
+        for _, holderKey in ipairs(keys) do
+            local entry = current[holderKey]
+            if not settled[holderKey] and entry and entry.Pickaxe == pickaxe.name then
+                settled[holderKey] = true
+                claimed = true
+                break
+            end
         end
+        if not claimed then
+            table.insert(remaining, pickaxe)
+        end
+    end
 
-        local entry = holders()[holderKey]
-        if entry and entry.Pickaxe ~= wanted.name then
+    local nextSpare = 1
+    for _, holderKey in ipairs(keys) do
+        if not settled[holderKey] then
+            local wanted = remaining[nextSpare]
+            if not wanted then
+                break
+            end
+            nextSpare = nextSpare + 1
+
+            local entry = current[holderKey]
             gameApi.EquipPickaxe(holderKey, wanted.name)
             log("[AutoUpgrade] " .. holderKey .. " pickaxe "
-                .. tostring(entry.Pickaxe or "none") .. " -> " .. wanted.name)
+                .. tostring(entry and entry.Pickaxe or "none") .. " -> " .. wanted.name)
             task.wait(0.3)
         end
     end
 end
 
-local function runJob()
-    busy = true
-    local bought = 0
+local function rollMutationsPass(remaining)
+    local rolled = 0
 
-    for holderKey, entry in pairs(holders()) do
-        if not enabled or bought >= maxPerPass then
+    for _, holderKey in ipairs(holderKeys()) do
+        if not enabled or rolled >= remaining then
             break
         end
 
-        local stat = chooseStat(entry)
-        if stat then
-            gameApi.UpgradeCharacter(holderKey, stat.event)
-            task.wait(0.4)
+        local variant = gameApi.HolderVariantMult(holderKey)
+        local cost = gameApi.MutationRollCost(holderKey)
 
-            local after = levelOf(holderKey, stat.field)
-            if after and after > stat.level then
-                log("[AutoUpgrade] " .. holderKey .. " " .. stat.event .. " "
-                    .. stat.level .. " -> " .. after)
-                bought = bought + 1
-            end
+        if variant < mutationTarget and cost
+            and cost <= spendable()
+            and (mutationBudget == 0 or cost <= mutationBudget)
+        then
+            gameApi.RollMutation(holderKey)
+            task.wait(0.5)
+
+            local after = gameApi.HolderVariantMult(holderKey)
+            log("[AutoUpgrade] " .. holderKey .. " mutation x" .. variant
+                .. " -> x" .. after .. " (cost " .. cost .. ")")
+            rolled = rolled + 1
         end
     end
+
+    return rolled
+end
+
+local function runJob()
+    busy = true
+
+    local bought, tooExpensive, maxed = upgradeStats()
 
     if buyPickaxe and enabled and bought < maxPerPass and tryPickaxe() then
         bought = bought + 1
@@ -247,23 +364,71 @@ local function runJob()
         equipPickaxesBestFirst()
     end
 
-    if rollMutations and enabled then
-        for holderKey in pairs(holders()) do
-            if bought >= maxPerPass then
-                break
-            end
-            gameApi.RollMutation(holderKey)
-            log("[AutoUpgrade] rolled a mutation on " .. holderKey)
-            bought = bought + 1
-            task.wait(0.4)
-        end
+    if rollMutations and enabled and bought < maxPerPass then
+        bought = bought + rollMutationsPass(maxPerPass - bought)
     end
 
     if bought == 0 then
-        log("[AutoUpgrade] nothing upgraded (maxed out or not enough cash)")
+        if tooExpensive > 0 then
+            log("[AutoUpgrade] nothing bought - can't afford the next upgrade yet")
+        elseif maxed > 0 then
+            log("[AutoUpgrade] every stat on every miner is maxed")
+        else
+            log("[AutoUpgrade] nothing to upgrade (no miners placed?)")
+        end
     end
 
     busy = false
+end
+
+-- Skip the turn entirely unless something is genuinely affordable and not
+-- already maxed, so a maxed-out or broke account stops taking turns from
+-- the others - and stops the game printing "already max mining speed" at
+-- the player five times a pass.
+function autoUpgrade.HasWork()
+    for _, holderKey in ipairs(holderKeys()) do
+        if chooseStat(holderKey) then
+            return true
+        end
+    end
+
+    if buyPickaxe and findPickaxe() then
+        return true
+    end
+
+    -- "Would equipping change anything?" rather than "is equipping on?" -
+    -- the latter meant every interval claimed a turn forever.
+    if equipPickaxes then
+        local owned = 0
+        for _, pickaxe in ipairs(gameApi.GetPickaxes()) do
+            owned = owned + pickaxe.ownedCount
+        end
+        if owned > 0 then
+            local wearing = 0
+            for _, entry in pairs(holders()) do
+                if type(entry) == "table" and entry.Pickaxe and entry.Pickaxe ~= "" then
+                    wearing = wearing + 1
+                end
+            end
+            if wearing < math.min(owned, #holderKeys()) then
+                return true
+            end
+        end
+    end
+
+    if rollMutations then
+        for _, holderKey in ipairs(holderKeys()) do
+            local cost = gameApi.MutationRollCost(holderKey)
+            if gameApi.HolderVariantMult(holderKey) < mutationTarget
+                and cost and cost <= spendable()
+                and (mutationBudget == 0 or cost <= mutationBudget)
+            then
+                return true
+            end
+        end
+    end
+
+    return false
 end
 
 function autoUpgrade.Step()

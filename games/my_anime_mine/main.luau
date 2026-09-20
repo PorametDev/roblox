@@ -1,9 +1,8 @@
 return function(import)
-    local Players = game:GetService("Players")
     local createWindow = import("core/ui")(import)
     local i18n = import("core/i18n")
     local antiAfk = import("core/anti_afk")(import)
-    local interactionLogger = import("core/interaction_logger")(import)
+    local buildEnv = import("core/build_env")
     local scheduler = import("core/scheduler")(import)
     local config = import("core/config")(import)
     local log = import("core/logger")
@@ -16,15 +15,16 @@ return function(import)
     -- writes back on change, so a reload comes up exactly as it was left.
     -- AddToggle only renders the default, it doesn't fire the callback, so
     -- a saved-on toggle has to be applied to its module explicitly.
-    local function persistentToggle(card, key, apply)
-        local saved = config.Get(key, false)
+    -- `default` matters for the options that ship switched on: without it
+    -- the toggle rendered OFF while the module was still ON, so the menu
+    -- disagreed with what was running.
+    local function persistentToggle(card, key, apply, default)
+        local saved = config.Get(key, default or false)
         card:AddToggle(saved, function(state)
             config.Set(key, state)
             apply(state)
         end)
-        if saved then
-            apply(true)
-        end
+        apply(saved)
     end
 
     -- Same idea for the numeric settings: load, apply, and save on change,
@@ -48,17 +48,6 @@ return function(import)
         apply(values[savedIndex] or values[default])
     end
 
-    local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
-    local getPlotParts = import("games/my_anime_mine/get_plot_parts")
-    local dumpInstance = import("games/my_anime_mine/debug_dump")
-    local dumpRemotes = import("games/my_anime_mine/debug_dump_remotes")(import)
-    local dumpSellCards = import("games/my_anime_mine/debug_dump_sell_cards")(import)
-    local dumpGui = import("games/my_anime_mine/debug_dump_gui")(import)
-    local dumpChest = import("games/my_anime_mine/debug_dump_chest")(import)
-    local inspectHandlers = import("games/my_anime_mine/debug_inspect_handlers")(import)
-    local probeEnv = import("games/my_anime_mine/debug_probe_env")(import)
-    local dumpState = import("games/my_anime_mine/debug_dump_state")(import)
-    local humanoid = import("core/humanoid")
     local autoMine = import("games/my_anime_mine/auto_mine")(import)
     local autoPlace = import("games/my_anime_mine/auto_place")(import)
     local autoChest = import("games/my_anime_mine/auto_chest")(import)
@@ -76,14 +65,14 @@ return function(import)
     -- server checks real position) or a menu open on screen, so only one
     -- runs at a time. Registration order IS the priority order - collect
     -- the chest, then fill and upgrade every holder, and only sell once
-    -- there's nothing left to place. Auto Sell has no HasWork check (you
-    -- can't tell what's sellable without opening the menu), so it goes last
-    -- and picks up whatever time the others aren't using.
+    -- there's nothing left to place, upgrade and research. Every one of
+    -- them can answer HasWork off the client's own state table now, so a
+    -- turn is only ever taken by something that has something to do.
     scheduler.RegisterExclusive("AutoChest", autoChest.Step, autoChest.IsEnabled, autoChest.IsBusy, autoChest.HasWork)
     scheduler.RegisterExclusive("AutoPlace", autoPlace.Step, autoPlace.IsEnabled, autoPlace.IsBusy, autoPlace.HasWork)
-    scheduler.RegisterExclusive("AutoUpgrade", autoUpgrade.Step, autoUpgrade.IsEnabled, autoUpgrade.IsBusy)
-    scheduler.RegisterExclusive("AutoResearch", autoResearch.Step, autoResearch.IsEnabled, autoResearch.IsBusy)
-    scheduler.RegisterExclusive("AutoSell", autoSell.Step, autoSell.IsEnabled, autoSell.IsBusy)
+    scheduler.RegisterExclusive("AutoUpgrade", autoUpgrade.Step, autoUpgrade.IsEnabled, autoUpgrade.IsBusy, autoUpgrade.HasWork)
+    scheduler.RegisterExclusive("AutoResearch", autoResearch.Step, autoResearch.IsEnabled, autoResearch.IsBusy, autoResearch.HasWork)
+    scheduler.RegisterExclusive("AutoSell", autoSell.Step, autoSell.IsEnabled, autoSell.IsBusy, autoSell.HasWork)
 
     scheduler.Start()
 
@@ -144,23 +133,28 @@ return function(import)
         { "lowest", "Damage", "Speed", "MineSpeed" },
         "autoUpgradePriority", 1, autoUpgrade.SetPriority
     )
+    -- Money is in the millions here, so a raw 0..N slider would be useless.
+    -- One step = one million.
+    persistentSlider(farmTab, "Auto Upgrade: กันเงินไว้", "ไม่ใช้เงินต่ำกว่าจำนวนนี้",
+        0, 500, "autoUpgradeKeepMoney", 0,
+        function(value) autoUpgrade.SetKeepMoney(value * 1e6) end, "M")
+
     persistentToggle(
         farmTab:AddCard("Auto Upgrade: ซื้อ Pickaxe ด้วย",
-            "ซื้อ pickaxe ตามที่เลือกด้านล่าง"),
-        "autoUpgradePickaxe", autoUpgrade.SetBuyPickaxe
+            "ร้าน pickaxe มีสต็อกจำกัดและรีสต็อกเป็นรอบ - ระบบจะซื้อเฉพาะตอนที่มีของจริง"),
+        "autoUpgradePickaxe", autoUpgrade.SetBuyPickaxe, true
     )
 
     -- The names come from MineConfig, so list the real ones rather than
     -- making the user guess an index. 0 leaves the choice to Auto Upgrade,
-    -- which buys the best one it can afford.
+    -- which copies the game's own "is a better pickaxe worth buying" rule.
+    -- Multiplier is shown because that - not price - is what makes one
+    -- pickaxe better than another.
     local pickaxes = gameApi.GetPickaxes()
-    local pickaxeNames = {}
-    for _, pickaxe in ipairs(pickaxes) do
-        pickaxeNames[pickaxe.index] = pickaxe.name
-    end
-
+    local pickaxeLabels = {}
     local highestIndex = 0
     for _, pickaxe in ipairs(pickaxes) do
+        pickaxeLabels[pickaxe.index] = pickaxe.name .. " (x" .. pickaxe.multiplier .. ")"
         highestIndex = math.max(highestIndex, pickaxe.index)
     end
 
@@ -168,9 +162,9 @@ return function(import)
         local pickaxeCard
         local function describePick(index)
             if index == 0 then
-                return "0 = เลือกอัตโนมัติ (ตัวที่ดีที่สุดที่ซื้อไหว)"
+                return "0 = เลือกอัตโนมัติ (ตามสูตรของเกมเอง)"
             end
-            return "#" .. index .. " " .. (pickaxeNames[index] or "(ไม่มีตัวนี้ให้ซื้อด้วยเงิน)")
+            return "#" .. index .. " " .. (pickaxeLabels[index] or "(ไม่มีตัวนี้ให้ซื้อด้วยเงิน)")
         end
 
         local savedPick = config.Get("autoUpgradePickaxeIndex", 0)
@@ -190,217 +184,61 @@ return function(import)
 
     persistentToggle(
         farmTab:AddCard("Auto Upgrade: แจก Pickaxe ให้ miner",
-            "ให้ miner ทุกตัวถือ pickaxe ที่ดีที่สุดที่เรามี"),
-        "autoUpgradeEquipPickaxe", autoUpgrade.SetEquipPickaxes
+            "แจกตัวที่ multiplier สูงสุดก่อน ถือซ้ำได้ถ้ามีหลายอัน"),
+        "autoUpgradeEquipPickaxe", autoUpgrade.SetEquipPickaxes, true
     )
+
     persistentToggle(
         farmTab:AddCard("Auto Upgrade: สุ่ม Mutation",
-            "ปิดไว้เป็นค่าเริ่มต้น - ไม่รู้ว่าการสุ่มหนึ่งครั้งเสียอะไรบ้าง"),
+            "รู้ราคาต่อครั้งแล้ว (GetMutationRollCost) แต่ยังเป็นการพนัน - ปิดไว้เป็นค่าเริ่มต้น"),
         "autoUpgradeRollMutation", autoUpgrade.SetRollMutations
     )
+    persistentSlider(farmTab, "Mutation: หยุดเมื่อได้ x", "สุ่มจนกว่าตัวคูณจะถึงค่านี้แล้วเลิกยุ่งกับตัวนั้น",
+        1, 20, "autoUpgradeMutationTarget", 2, autoUpgrade.SetMutationTarget, "x")
+    persistentSlider(farmTab, "Mutation: เพดานราคาต่อครั้ง", "0 = ไม่จำกัด",
+        0, 500, "autoUpgradeMutationBudget", 0,
+        function(value) autoUpgrade.SetMutationBudget(value * 1e6) end, "M")
 
     persistentToggle(farmTab:AddCard(
         "Auto Research (Plot)",
-        "ซื้อ research ทุก family ในโซนที่ปลดแล้วผ่าน remote ตรง (ไม่เปิด UI)"
+        "ซื้อเฉพาะ node ที่เปิดแล้วและยังไม่เต็ม ตามกฎเดียวกับปุ่ม Buy ในเกม"
     ), "autoResearch", autoResearch.SetEnabled)
-    persistentSlider(farmTab, "Auto Research: รอบเช็ค", "เปิดหน้า research ทุกกี่วินาที",
+    persistentSlider(farmTab, "Auto Research: รอบเช็ค", "ไล่ซื้อทุกกี่วินาที",
         10, 600, "autoResearchInterval", 30, autoResearch.SetCheckInterval, "s")
     persistentSlider(farmTab, "Auto Research: ซื้อสูงสุดต่อรอบ", "กันไม่ให้ใช้เงินหมดในรอบเดียว",
         1, 20, "autoResearchMaxPerPass", 5, autoResearch.SetMaxPerPass, "x")
-
-    -- Everything below lives in its own tab so shipping a release is just
-    -- deleting this block - no debug controls tangled up with the real
-    -- ones.
-    local debugTab = window:AddTab("ดีบัก", "🐛")
-
+    persistentSlider(farmTab, "Auto Research: กันเงินไว้", "ไม่ใช้เงินต่ำกว่าจำนวนนี้",
+        0, 500, "autoResearchKeepMoney", 0,
+        function(value) autoResearch.SetKeepMoney(value * 1e6) end, "M")
     persistentToggle(
-        debugTab:AddCard(
-            "Interaction Logger",
-            "เปิดแล้วไปกด/แตะอะไรก็ได้ในเกม ทุก prompt/click/ปุ่มจะถูกบันทึกลง MekPro.log"
-        ),
-        "interactionLogger",
-        interactionLogger.SetEnabled
-    )
-
-    local debugCard = debugTab:AddCard("Debug: Current Plot", "กดเพื่อเช็ค plot ปัจจุบัน (ผลขึ้นตรงบนปุ่มเอง ไม่ต้องพึ่ง console)")
-    -- Forward-declared: the callback below closes over `checkBtn`, but a
-    -- `local checkBtn = AddButton(..., function() checkBtn... end)` in one
-    -- statement would have the closure see the OUTER (nil) checkBtn - the
-    -- new local's scope doesn't start until after the whole statement ends.
-    local checkBtn
-    checkBtn = debugCard:AddButton("Check", function()
-        local plot = getCurrentPlot()
-        if not plot then
-            checkBtn.Text = "not found"
-            log("[MyAnimeMine] not standing in any plot")
-            return
-        end
-
-        local parts = getPlotParts(plot)
-        local nodeCount = parts.Nodes and #parts.Nodes:GetChildren() or 0
-        local holderCount = parts.Holders and #parts.Holders:GetChildren() or 0
-
-        checkBtn.Text = plot.Name
-        log(string.format(
-            "[MyAnimeMine] current plot: %s | Nodes: %d | Holders: %d",
-            plot.Name, nodeCount, holderCount
-        ))
-    end)
-
-    local dumpCard = debugTab:AddCard(
-        "Debug: Dump Node/Holder",
-        "กดเพื่อบันทึกโครงสร้างข้างใน Node แรกกับ Holder แรกลง MekPro.log"
-    )
-    local dumpBtn
-    dumpBtn = dumpCard:AddButton("Dump", function()
-        local plot = getCurrentPlot()
-        if not plot then
-            dumpBtn.Text = "no plot"
-            return
-        end
-
-        local ok, err = log("[MyAnimeMine] === Dump start ===")
-        if not ok then
-            dumpBtn.Text = "log failed"
-            dumpCard:SetSubtitle("Error: " .. tostring(err))
-            return
-        end
-
-        local parts = getPlotParts(plot)
-
-        local firstNode = parts.Nodes and parts.Nodes:GetChildren()[1]
-        if firstNode then
-            log("[MyAnimeMine] === Node: " .. firstNode.Name .. " ===")
-            dumpInstance(firstNode, log)
-        else
-            log("[MyAnimeMine] no nodes present right now")
-        end
-
-        local firstHolder = parts.Holders and parts.Holders:GetChildren()[1]
-        if firstHolder then
-            log("[MyAnimeMine] === Holder: " .. firstHolder.Name .. " ===")
-            dumpInstance(firstHolder, log)
-        else
-            log("[MyAnimeMine] no holders found")
-        end
-
-        dumpBtn.Text = "Done"
-    end)
-
-    local toolDumpCard = debugTab:AddCard(
-        "Debug: Dump Backpack Tool",
-        "กดเพื่อบันทึก attribute/โครงสร้างของ miner ตัวแรกใน Backpack ลง MekPro.log"
-    )
-    local toolDumpBtn
-    toolDumpBtn = toolDumpCard:AddButton("Dump", function()
-        local backpack = Players.LocalPlayer:FindFirstChild("Backpack")
-        local tool = backpack and backpack:FindFirstChildWhichIsA("Tool")
-        if not tool then
-            toolDumpBtn.Text = "no tool"
-            return
-        end
-
-        log("[MyAnimeMine] === Tool: " .. tool.Name .. " ===")
-        for attrName, attrValue in pairs(tool:GetAttributes()) do
-            log("  [attr] " .. attrName .. " = " .. tostring(attrValue))
-        end
-        dumpInstance(tool, log)
-
-        toolDumpBtn.Text = "Done"
-    end)
-
-    local remoteDumpCard = debugTab:AddCard(
-        "Debug: Dump All Remotes",
-        "กดเพื่อบันทึกรายชื่อ RemoteEvent/RemoteFunction ทั้งหมดใน ReplicatedStorage ลง MekPro.log"
-    )
-    local remoteDumpBtn
-    remoteDumpBtn = remoteDumpCard:AddButton("Dump", function()
-        local count = dumpRemotes()
-        remoteDumpBtn.Text = count .. " remotes"
-    end)
-
-    local sellCardsDumpCard = debugTab:AddCard(
-        "Debug: Dump Sell Cards",
-        "เปิดหน้าขายของ (SellStand) ก่อน แล้วกดปุ่มนี้เพื่อดูว่าแต่ละ Card ระบุไอเทมด้วยอะไร"
-    )
-    local sellCardsDumpBtn
-    sellCardsDumpBtn = sellCardsDumpCard:AddButton("Dump", function()
-        local count = dumpSellCards()
-        sellCardsDumpBtn.Text = count .. " cards"
-    end)
-
-    local guiDumpCard = debugTab:AddCard(
-        "Debug: Dump Visible GUI",
-        "เปิดหน้าจอที่อยากดูก่อน (เช่นหน้า Take All ตอนเปิด chest) แล้วกดปุ่มนี้"
-    )
-    local guiDumpBtn
-    guiDumpBtn = guiDumpCard:AddButton("Dump", function()
-        dumpGui()
-        guiDumpBtn.Text = "Done"
-    end)
-
-    local chestDumpCard = debugTab:AddCard(
-        "Debug: Dump Chest Data",
-        "หาว่าจำนวนของใน chest ถูกเก็บไว้ที่ไหน จะได้เช็คได้โดยไม่ต้องเปิด UI"
-    )
-    local chestDumpBtn
-    chestDumpBtn = chestDumpCard:AddButton("Dump", function()
-        local count = dumpChest()
-        chestDumpBtn.Text = count .. " parts"
-    end)
-
-    local handlersCard = debugTab:AddCard(
-        "Debug: Inspect Button Handlers",
-        "อ่านว่าปุ่มพวกนี้ยิง remote ไหนด้วย arg อะไร (เปิดเมนูที่จะตรวจค้างไว้ก่อนกด)"
-    )
-    local handlersBtn
-    handlersBtn = handlersCard:AddButton("Inspect", function()
-        inspectHandlers()
-        handlersBtn.Text = "Done"
-    end)
-
-    local probeCard = debugTab:AddCard(
-        "Debug: Probe Executor + Scripts",
-        "เช็คว่า Potassium ทำอะไรได้บ้าง และลอง decompile script ของเกมเพื่อหา remote จริง"
-    )
-    local probeBtn
-    probeBtn = probeCard:AddButton("Probe", function()
-        probeEnv()
-        probeBtn.Text = "Done"
-    end)
-
-    local stateCard = debugTab:AddCard(
-        "Debug: Dump Game State",
-        "พิมพ์โครงสร้าง GameState.GetData2().MineGame เพื่อหา key ที่ remote ต้องใช้"
-    )
-    local stateBtn
-    stateBtn = stateCard:AddButton("Dump", function()
-        dumpState()
-        stateBtn.Text = "Done"
-    end)
-
-    -- Movement helpers live in core because nothing about them is specific
-    -- to this game; they sit in the debug tab since they're the most
-    -- visible thing the hub can do.
-    humanoid.Start()
-
-    persistentSlider(debugTab, "ความเร็ววิ่ง", "WalkSpeed (ปกติ 16)",
-        8, 200, "walkSpeed", 16, humanoid.SetWalkSpeed, "")
-    persistentSlider(debugTab, "แรงกระโดด", "JumpPower (ปกติ 50)",
-        30, 300, "jumpPower", 50, humanoid.SetJumpPower, "")
-
-    persistentToggle(
-        debugTab:AddCard("บิน (Fly)", "บินด้วย WASD + Space/Ctrl ตามทิศกล้อง"),
-        "fly", humanoid.SetFlying
+        farmTab:AddCard("Auto Research: ซื้อสาย Zone",
+            "ต้นไม้ของแต่ละโซน (The Underground ฯลฯ)"),
+        "autoResearchZones", autoResearch.SetBuyZones, true
     )
     persistentToggle(
-        debugTab:AddCard("มุดแมพ (Noclip)", "เดินทะลุกำแพงและพื้น"),
-        "noclip", humanoid.SetNoclip
+        farmTab:AddCard("Auto Research: ซื้อสาย Core",
+            "แท็บ Core ใช้ remote คนละตัวต่อหนึ่งอัปเกรด - เมื่อก่อนไม่ได้ซื้อเลย"),
+        "autoResearchCore", autoResearch.SetBuyCore, true
     )
-    persistentToggle(
-        debugTab:AddCard("ลอย (Float)", "ล็อกความสูงไว้ที่ระดับปัจจุบัน"),
-        "float", humanoid.SetFloating
+    persistentSegmented(
+        farmTab,
+        { "ถูกสุดก่อน", "แพงสุดก่อน" },
+        { true, false },
+        "autoResearchCheapestFirst", 1, autoResearch.SetCheapestFirst
     )
+
+    -- The debug tab is built by core/debug_tab and only when this is a dev
+    -- build. In a prod bundle scripts/build.py leaves every core/debug_*
+    -- module out of the output entirely, so this import has to stay inside
+    -- the `if` - at the top of the file it would be a missing-module error.
+    local stopDebug = nil
+    if buildEnv.IsDev then
+        stopDebug = import("core/debug_tab")(import)(window, {
+            Toggle = persistentToggle,
+            Slider = persistentSlider,
+        })
+    end
+
 
     local settingsTab = window:AddTab("ตั้งค่า", "⚙")
 
@@ -436,10 +274,11 @@ return function(import)
         autoPlace.SetEnabled(false)
         autoChest.SetEnabled(false)
         antiAfk.SetEnabled(false)
-        interactionLogger.SetEnabled(false)
         autoSell.SetEnabled(false)
         autoUpgrade.SetEnabled(false)
         autoResearch.SetEnabled(false)
-        humanoid.Stop()
+        if stopDebug then
+            stopDebug()
+        end
     end)
 end
