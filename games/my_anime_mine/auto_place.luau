@@ -15,7 +15,7 @@ return function(import)
 
 local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
 local getPlotParts = import("games/my_anime_mine/get_plot_parts")
-local getBestMiner = import("games/my_anime_mine/get_best_miner")(import)
+local getMinerSlots = import("games/my_anime_mine/get_best_miner")(import)
 local teleport = import("core/teleport")
 local click = import("core/click")
 local log = import("core/logger")
@@ -93,36 +93,52 @@ function autoPlace.IsBusy()
     return busy
 end
 
-local function runJob(holder, prompt, miner)
+-- "Place <name>" is the game telling us it sees the held miner. Until then
+-- pressing E does nothing.
+local function isPromptReady(prompt)
+    return prompt.ActionText ~= nil and prompt.ActionText:find("Place", 1, true) ~= nil
+end
+
+local function holdMiner(prompt, miner)
+    local key = SLOT_KEYS[miner.slot]
+    if not key then
+        return false
+    end
+
+    click.Key(key)
+
+    for _ = 1, 8 do
+        task.wait(0.1)
+        if isPromptReady(prompt) then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function runJob(holder, prompt, candidates)
     busy = true
 
     teleport.To(prompt.Parent)
     task.wait(0.2)
 
-    local key = SLOT_KEYS[miner.slot]
-    if not key then
-        log("[AutoPlace] slot " .. tostring(miner.slot) .. " has no key binding")
-        teleport.Return()
-        busy = false
-        return
-    end
-
-    click.Key(key)
-
-    -- "Place <name>" is the game telling us it sees the held miner. Until
-    -- then pressing E does nothing.
-    local ready = false
-    for _ = 1, 10 do
-        task.wait(0.1)
-        if prompt.ActionText and prompt.ActionText:find("Place", 1, true) then
-            ready = true
+    -- Walk down from the strongest: an emptied stack still shows a card the
+    -- game won't let us hold, which had Auto Place pressing a dead key over
+    -- and over instead of reaching for the next miner.
+    local miner = nil
+    for _, candidate in ipairs(candidates) do
+        if holdMiner(prompt, candidate) then
+            miner = candidate
             break
         end
+        log("[AutoPlace] slot " .. candidate.slot .. " (" .. candidate.name
+            .. ") didn't take, trying the next one")
     end
 
-    if not ready then
-        log("[AutoPlace] prompt still says '" .. tostring(prompt.ActionText)
-            .. "' after selecting slot " .. miner.slot .. " (" .. miner.name .. "), skipping")
+    if not miner then
+        log("[AutoPlace] no hotbar slot would hold, prompt says '"
+            .. tostring(prompt.ActionText) .. "'")
         teleport.Return()
         busy = false
         return
@@ -170,15 +186,15 @@ function autoPlace.Step()
         return
     end
 
-    local miner = getBestMiner()
-    if not miner then
+    local candidates = getMinerSlots()
+    if #candidates == 0 then
         reason("hotbar has no miner to place")
         return
     end
 
     lastReason = nil
     task.spawn(function()
-        runJob(holder, prompt, miner)
+        runJob(holder, prompt, candidates)
     end)
 end
 
