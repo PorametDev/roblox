@@ -7,6 +7,12 @@ return function(import)
     local config = import("core/config")(import)
     local log = import("core/logger")
 
+    -- First line in every session's log. Several debugging rounds have
+    -- been spent on the question "is this log from the build I just
+    -- pushed?", and it should never have to be asked again.
+    log("[MekPro] build " .. buildEnv.Commit .. " (" .. buildEnv.Env
+        .. ", built " .. buildEnv.BuiltAt .. ")")
+
     local window = createWindow({
         Subtitle = "My Anime Mine · Mining Hub",
     })

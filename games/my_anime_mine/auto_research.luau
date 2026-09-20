@@ -59,12 +59,32 @@ local enabled = false
 local busy = false
 local lastAttempt = 0
 
+-- Forward-declared: reportIdle needs the settings and helpers defined
+-- below it, but SetEnabled above wants to call it.
+local reportIdle
+
 function autoResearch.SetEnabled(state)
     if state == enabled then
         return
     end
     enabled = state
     log("[AutoResearch] " .. (enabled and "enabled" or "disabled"))
+
+    -- Report straight away on switch-on rather than waiting for the
+    -- scheduler. Last round the idle report lived somewhere that only ran
+    -- once the scheduler had granted a turn, which is exactly what wasn't
+    -- happening, so the log came back empty again. Flipping the toggle now
+    -- always produces output, whatever the scheduler decides.
+    if enabled then
+        task.spawn(function()
+            -- The game's modules may not have answered yet on a fresh
+            -- join; a moment's grace beats reporting zeroes.
+            task.wait(1)
+            if enabled then
+                reportIdle()
+            end
+        end)
+    end
 end
 
 function autoResearch.IsEnabled()
@@ -295,7 +315,7 @@ end
 -- needed explaining, "Auto Research is enabled and never takes a turn",
 -- was the one case that produced no output whatsoever. It has now cost
 -- two wrong guesses.
-local function reportIdle()
+function reportIdle()
     local money = gameApi.GetMoney()
     local budget = spendable()
     local zones = gameApi.UnlockedZones()

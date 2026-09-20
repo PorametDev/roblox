@@ -18,6 +18,8 @@ on top of this output for anything that actually needs to resist reversing.
 import argparse
 import os
 import random
+import subprocess
+import time
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCAN_DIRS = ["core", "games"]
@@ -42,6 +44,29 @@ DEBUG_PREFIX = "core/debug_"
 PLACEHOLDER = "\x01"
 
 
+def git_commit():
+    """Short HEAD sha, or "dirty"/"unknown" when that can't be established.
+
+    Note this is HEAD at BUILD time, so a build made before committing
+    reports the previous commit - the +N suffix flags that case.
+    """
+    try:
+        sha = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=REPO_ROOT, text=True
+        ).strip()
+    except Exception:
+        return "unknown"
+
+    try:
+        dirty = subprocess.check_output(
+            ["git", "status", "--porcelain"], cwd=REPO_ROOT, text=True
+        ).strip()
+    except Exception:
+        dirty = ""
+
+    return sha + "+" if dirty else sha
+
+
 def collect_modules(env):
     modules = {}
     for scan_dir in SCAN_DIRS:
@@ -61,9 +86,18 @@ def collect_modules(env):
     # Stamped in rather than read from disk, so the flag the bundle runs on
     # is the flag it was built with - core/build_env.luau on disk only ever
     # describes a local main.luau run.
-    modules["core/build_env"] = 'return { Env = "%s", IsDev = %s }' % (
-        env,
-        "true" if env == "dev" else "false",
+    #
+    # The commit goes in too, because "is the log I'm reading from the build
+    # I just shipped?" has been unanswerable several times now, and guessing
+    # wrong costs a whole round trip through the game.
+    modules["core/build_env"] = (
+        'return { Env = "%s", IsDev = %s, Commit = "%s", BuiltAt = "%s" }'
+        % (
+            env,
+            "true" if env == "dev" else "false",
+            git_commit(),
+            time.strftime("%Y-%m-%d %H:%M:%S"),
+        )
     )
     return modules
 

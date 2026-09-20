@@ -10,4 +10,8 @@
 return {
     Env = "dev",
     IsDev = true,
+    -- Filled in properly by the bundler; "local" is what a main.luau run
+    -- from disk reports, since there is no bundle to identify.
+    Commit = "local",
+    BuiltAt = "local",
 }
