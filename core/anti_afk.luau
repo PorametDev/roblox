@@ -1,3 +1,6 @@
+return function(import)
+
+local log = import("core/logger")
 local Players = game:GetService("Players")
 local VirtualUser = game:GetService("VirtualUser")
 
@@ -11,14 +14,14 @@ function antiAfk.SetEnabled(enabled)
 
     if enabled then
         local player = Players.LocalPlayer
-        print("[AntiAFK] enabled - watching Player.Idled")
+        log("[AntiAFK] enabled - watching Player.Idled")
         connection = player.Idled:Connect(function()
-            print("[AntiAFK] idle detected, simulating input at", os.date("%X"))
+            log("[AntiAFK] idle detected, simulating input")
             VirtualUser:CaptureController()
             VirtualUser:ClickButton2(Vector2.new())
         end)
     else
-        print("[AntiAFK] disabled")
+        log("[AntiAFK] disabled")
         connection:Disconnect()
         connection = nil
     end
@@ -29,3 +32,5 @@ function antiAfk.IsEnabled()
 end
 
 return antiAfk
+
+end

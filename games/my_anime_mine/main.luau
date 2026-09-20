@@ -1,7 +1,8 @@
 return function(import)
     local createWindow = import("core/ui")(import)
     local i18n = import("core/i18n")
-    local antiAfk = import("core/anti_afk")
+    local antiAfk = import("core/anti_afk")(import)
+    local log = import("core/logger")
 
     local window = createWindow({
         Subtitle = "My Anime Mine · Mining Hub",
@@ -13,19 +14,24 @@ return function(import)
     local farmTab = window:AddTab("ฟาร์ม", "🏠")
     -- Business logic for My Anime Mine goes here.
 
-    farmTab:AddCard("Debug: Current Plot", "กดเพื่อพิมพ์ plot ปัจจุบันลง console"):AddButton("Check", function()
+    local debugCard = farmTab:AddCard("Debug: Current Plot", "กดเพื่อเช็ค plot ปัจจุบัน (ผลขึ้นตรงนี้ ไม่ต้องพึ่ง console)")
+    debugCard:AddButton("Check", function()
         local plot = getCurrentPlot()
         if not plot then
-            print("[MyAnimeMine] not standing in any plot")
+            debugCard:SetValue("not found")
+            log("[MyAnimeMine] not standing in any plot")
             return
         end
 
         local parts = getPlotParts(plot)
-        print(
-            "[MyAnimeMine] current plot:", plot.Name,
-            "| Nodes:", parts.Nodes and #parts.Nodes:GetChildren() or 0,
-            "| Holders:", parts.Holders and #parts.Holders:GetChildren() or 0
-        )
+        local nodeCount = parts.Nodes and #parts.Nodes:GetChildren() or 0
+        local holderCount = parts.Holders and #parts.Holders:GetChildren() or 0
+
+        debugCard:SetValue(plot.Name)
+        log(string.format(
+            "[MyAnimeMine] current plot: %s | Nodes: %d | Holders: %d",
+            plot.Name, nodeCount, holderCount
+        ))
     end)
 
     local settingsTab = window:AddTab("ตั้งค่า", "⚙")
