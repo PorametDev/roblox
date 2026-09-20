@@ -223,18 +223,93 @@ function api.WantedPickaxe()
     return wanted
 end
 
+-- MineInventory.ChestEntries is what the chest screen itself counts, so
+-- this matches the "397/126.3K Items" readout exactly rather than guessing
+-- at the shape of MineGame.Chest.
 function api.ChestCount()
+    if not modules() then
+        return nil
+    end
+
     local mine = api.GetMineData()
-    local chest = mine and mine.Chest
-    if not chest then
+    if not mine then
+        return nil
+    end
+
+    local ok, entries = pcall(mineInventory.ChestEntries, mine)
+    if not ok or type(entries) ~= "table" then
         return nil
     end
 
     local total = 0
-    for _, entry in pairs(chest) do
-        total = total + (tonumber(entry) or entry.Count or entry.SellCount or 0)
+    for _, entry in ipairs(entries) do
+        total = total + (tonumber(entry.Count) or 0)
     end
     return total
+end
+
+-- The chest has a ceiling, and once it's hit everything the miners dig is
+-- thrown away - so this is a limit worth knowing about, not just a number
+-- on a bar.
+function api.ChestCapacity()
+    if not modules() then
+        return nil
+    end
+
+    local mine = api.GetMineData()
+    if not mine then
+        return nil
+    end
+
+    local ok, capacity = pcall(mineConfig.GetChestCapacityFor, mine, 0)
+    return ok and tonumber(capacity) or nil
+end
+
+-- Take All is a no-op on an empty chest - the game's own button checks
+-- this before sending.
+function api.ChestHasItems()
+    local mine = api.GetMineData()
+    return mine ~= nil and next(mine.Chest or {}) ~= nil
+end
+
+-- Miner slot M<i> exists only while i <= MinerSlots; past that the holder
+-- is bought-but-not-yet-owned and every interaction with it is refused.
+-- Reading this beats walking over to a holder to see which ProximityPrompt
+-- text it shows.
+function api.MinerSlots()
+    if not modules() then
+        return 0
+    end
+
+    local data = api.GetData()
+    local mine = data and data.MineGame
+    if not mine then
+        return 0
+    end
+
+    local ok, count = pcall(function()
+        return tonumber(mine.MinerSlots or data.MinerSlots or mineConfig.BaseMinerSlots) or 0
+    end)
+    return (ok and count) or 0
+end
+
+function api.MaxMinerSlots()
+    if not modules() then
+        return 0
+    end
+    local ok, count = pcall(function() return tonumber(mineConfig.MaxMinerSlots) or 0 end)
+    return (ok and count) or 0
+end
+
+-- true / false for a miner slot; nil for anything else (hauler slots
+-- aren't described in MineConfig, so those still have to be judged from
+-- the prompt on the holder itself).
+function api.IsSlotUnlocked(holderKey)
+    local index = tostring(holderKey):match("^M(%d+)$")
+    if not index then
+        return nil
+    end
+    return tonumber(index) <= api.MinerSlots()
 end
 
 local function send(...)

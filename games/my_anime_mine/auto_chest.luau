@@ -8,6 +8,13 @@
 -- prompt, waits for a popup, or clicks anything - it reads the count and
 -- sends one event.
 --
+-- Two limits of the game's own apply here. Take All is a no-op on an empty
+-- chest - the real button checks that before sending - and the chest has a
+-- CAPACITY (MineConfig.GetChestCapacityFor), past which everything the
+-- miners dig is simply discarded. So the threshold is clamped to the
+-- capacity: setting "collect at 3000" on a chest that only holds 126 would
+-- otherwise mean never collecting while the overflow is thrown away.
+--
 -- Registered with core/scheduler as EXCLUSIVE purely out of caution while
 -- this approach is new; it no longer moves the character, so it could
 -- become standalone once it's proven.
@@ -56,11 +63,24 @@ function autoChest.SetCheckInterval(seconds)
     checkInterval = math.max(seconds, 1)
 end
 
+-- Never ask for more than the chest can physically hold, and never for
+-- more than it currently has - a full chest is wasting every swing.
+local function threshold()
+    local capacity = gameApi.ChestCapacity()
+    if capacity and capacity > 0 then
+        return math.min(minItemsToCollect, capacity)
+    end
+    return minItemsToCollect
+end
+
 -- Reading the count is now a plain table lookup, so the scheduler can ask
 -- as often as it likes.
 function autoChest.HasWork()
+    if not gameApi.ChestHasItems() then
+        return false
+    end
     local count = gameApi.ChestCount()
-    return count ~= nil and count >= minItemsToCollect
+    return count ~= nil and count >= threshold()
 end
 
 function autoChest.Step()
@@ -83,9 +103,22 @@ function autoChest.Step()
         return
     end
 
-    if count < minItemsToCollect then
+    -- The game's own Take All does nothing on an empty chest, so don't
+    -- spend a remote call finding that out.
+    if not gameApi.ChestHasItems() then
+        if lastReported ~= "empty" then
+            log("[AutoChest] chest is empty")
+            lastReported = "empty"
+        end
+        return
+    end
+
+    local want = threshold()
+    if count < want then
         if lastReported ~= "waiting" then
-            log("[AutoChest] waiting: " .. count .. "/" .. minItemsToCollect .. " items")
+            local capacity = gameApi.ChestCapacity()
+            log("[AutoChest] waiting: " .. count .. "/" .. want .. " items"
+                .. (capacity and (" (chest holds " .. capacity .. ")") or ""))
             lastReported = "waiting"
         end
         return

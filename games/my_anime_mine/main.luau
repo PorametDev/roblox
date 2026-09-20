@@ -72,7 +72,15 @@ return function(import)
     scheduler.RegisterExclusive("AutoPlace", autoPlace.Step, autoPlace.IsEnabled, autoPlace.IsBusy, autoPlace.HasWork)
     scheduler.RegisterExclusive("AutoUpgrade", autoUpgrade.Step, autoUpgrade.IsEnabled, autoUpgrade.IsBusy, autoUpgrade.HasWork)
     scheduler.RegisterExclusive("AutoResearch", autoResearch.Step, autoResearch.IsEnabled, autoResearch.IsBusy, autoResearch.HasWork)
-    scheduler.RegisterExclusive("AutoSell", autoSell.Step, autoSell.IsEnabled, autoSell.IsBusy, autoSell.HasWork)
+
+    -- Sell runs last, as asked - but last must not mean never. The 04:01
+    -- log has Auto Chest and Auto Upgrade trading turns for four minutes
+    -- with Auto Sell not getting a single one, and since selling is what
+    -- produces the money the other two spend, strict priority was quietly
+    -- strangling the whole loop. The wait cap is the floor under that: if
+    -- Auto Sell has had something to sell for 90 seconds and still hasn't
+    -- been given a turn, it takes one.
+    scheduler.RegisterExclusive("AutoSell", autoSell.Step, autoSell.IsEnabled, autoSell.IsBusy, autoSell.HasWork, 90)
 
     scheduler.Start()
 

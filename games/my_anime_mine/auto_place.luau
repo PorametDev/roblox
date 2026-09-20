@@ -75,6 +75,17 @@ local function findPriceTag(holder)
 end
 
 local function isLocked(prompt, holder)
+    -- The authoritative answer, and the only one that works from across
+    -- the map: MineHUDClient decides a miner slot is unlocked with
+    -- `i <= (MineGame.MinerSlots or MineConfig.BaseMinerSlots)`. Everything
+    -- below is a fallback for holders that aren't numbered miner slots
+    -- (the hauler ones), where MineConfig describes no such rule.
+    local unlocked = gameApi.IsSlotUnlocked(holder.Name)
+    if unlocked == false then
+        return true, "slot " .. holder.Name .. " not bought yet ("
+            .. gameApi.MinerSlots() .. "/" .. gameApi.MaxMinerSlots() .. " owned)"
+    end
+
     if prompt.ObjectText == LOCKED_SLOT_TEXT then
         return true, "locked slot"
     end
