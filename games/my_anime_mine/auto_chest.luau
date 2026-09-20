@@ -1,28 +1,15 @@
--- Hiding ChestFrame's Content/Backdrop/Close caused the game's whole UI to
--- disappear for the user - pulled out entirely for now so the game stays
--- usable. Once Take All is confirmed actually collecting (teleporting to
--- the chest first, below), popup-hiding can be revisited more carefully.
+-- Restructured into a single one-shot job instead of a per-tick state
+-- machine: check the condition (>= MIN_ITEMS_TO_COLLECT) FIRST, before
+-- teleporting or opening anything. Only if it's met do we teleport, open
+-- the chest, click Take All once, and teleport back - the whole thing runs
+-- to completion as one job instead of repeatedly re-clicking every tick
+-- while the frame stays open. core/turn_scheduler calls Step() often, but
+-- a new job only starts every CHECK_INTERVAL and while `busy` is true every
+-- call until the current job finishes is a no-op.
 --
--- Two bugs found earlier from the Visible-transition log: (1) we kept
--- firing the ProximityPrompt every tick even while ChestFrame was already
--- open, which toggled it closed again before TakeButton could do anything
--- (open/close looped forever). (2) TakeButton's own label never confirmed
--- anything happened. Fix: only fire the prompt when the frame is currently
--- closed; click TakeButton on every tick it's open.
---
--- Only actually collects once the chest's own progress label
--- ("141/3,600 Items") shows at least MIN_ITEMS_TO_COLLECT, so we're not
--- taking a nearly-empty chest every second - per user request.
---
--- The item count never actually went down after clicking TakeButton, same
--- symptom Auto Sell had: the server likely checks the player's REAL
--- position for the actual collect action too, same as selling did.
--- Teleport to the chest via core/teleport before opening it, and back once
--- it closes.
---
--- Step() itself no longer owns a Heartbeat connection - core/turn_scheduler
--- calls it only when it's this task's turn, so multiple autos never fire in
--- the same frame and fight over the character.
+-- The item count previously never actually went down after clicking
+-- TakeButton: the server checks the player's REAL position for the collect
+-- action, same as selling does, hence the teleport via core/teleport.
 return function(import)
 
 local Players = game:GetService("Players")
@@ -31,8 +18,7 @@ local getPlotParts = import("games/my_anime_mine/get_plot_parts")
 local teleport = import("core/teleport")(import)
 local log = import("core/logger")
 
-local FIRE_INTERVAL = 0.5
-local RECHECK_COOLDOWN = 5
+local CHECK_INTERVAL = 3
 local MIN_ITEMS_TO_COLLECT = 100
 
 local function getChestFrame()
@@ -62,11 +48,16 @@ local function clickButton(button)
     end)
 end
 
+local function getChestPrompt()
+    local plot = getCurrentPlot()
+    local parts = plot and getPlotParts(plot)
+    return parts and parts.Chest and parts.Chest:FindFirstChildWhichIsA("ProximityPrompt", true)
+end
+
 local autoChest = {}
 local enabled = false
-local lastFire = 0
-local lastVisibleState = nil
-local nextOpenCheck = 0
+local busy = false
+local lastAttempt = 0
 
 function autoChest.SetEnabled(state)
     if state == enabled then
@@ -75,10 +66,12 @@ function autoChest.SetEnabled(state)
     enabled = state
 
     if not enabled then
-        teleport.Return()
+        if not busy then
+            teleport.Return()
+        end
         log("[AutoChest] disabled")
     else
-        nextOpenCheck = 0
+        lastAttempt = 0
         log("[AutoChest] enabled (collects once >= " .. MIN_ITEMS_TO_COLLECT .. " items)")
     end
 end
@@ -87,63 +80,78 @@ function autoChest.IsEnabled()
     return enabled
 end
 
-function autoChest.Step()
+local function runJob()
+    busy = true
+
+    local prompt = getChestPrompt()
+    if not prompt then
+        busy = false
+        return
+    end
+
+    teleport.To(prompt.Parent)
+
+    local ok, err = pcall(function()
+        fireproximityprompt(prompt, Enum.ProximityPromptInputType.Keyboard, prompt.HoldDuration)
+    end)
+    if not ok then
+        log("[AutoChest] fireproximityprompt error: " .. tostring(err))
+        teleport.Return()
+        busy = false
+        return
+    end
+
+    task.wait(0.3)
+
     if not enabled then
+        teleport.Return()
+        busy = false
+        return
+    end
+
+    local chestFrame = getChestFrame()
+    if not (chestFrame and chestFrame.Visible) then
+        log("[AutoChest] chest didn't open, aborting")
+        teleport.Return()
+        busy = false
+        return
+    end
+
+    local count = getItemCount(chestFrame)
+    if count and count < MIN_ITEMS_TO_COLLECT then
+        log("[AutoChest] only " .. count .. " items, closing")
+        local closeButton = chestFrame:FindFirstChild("Close")
+        if closeButton then
+            clickButton(closeButton)
+        end
+        teleport.Return()
+        busy = false
+        return
+    end
+
+    local takeButton = getTakeButton(chestFrame)
+    if takeButton then
+        clickButton(takeButton)
+        log("[AutoChest] clicked TakeButton (" .. tostring(count) .. " items)")
+    end
+
+    task.wait(0.5)
+    teleport.Return()
+    busy = false
+end
+
+function autoChest.Step()
+    if not enabled or busy then
         return
     end
 
     local now = tick()
-    if now - lastFire < FIRE_INTERVAL then
+    if now - lastAttempt < CHECK_INTERVAL then
         return
     end
-    lastFire = now
+    lastAttempt = now
 
-    local chestFrame = getChestFrame()
-    local visible = chestFrame ~= nil and chestFrame.Visible
-
-    if visible ~= lastVisibleState then
-        log("[AutoChest] ChestFrame.Visible = " .. tostring(visible))
-        lastVisibleState = visible
-
-        if not visible then
-            -- Covers every way the frame can close: taking successfully,
-            -- closing a too-small chest, or the player closing it themselves.
-            teleport.Return()
-        end
-    end
-
-    if visible then
-        local count = getItemCount(chestFrame)
-        if count and count < MIN_ITEMS_TO_COLLECT then
-            log("[AutoChest] only " .. count .. " items, waiting for " .. MIN_ITEMS_TO_COLLECT)
-            local closeButton = chestFrame:FindFirstChild("Close")
-            if closeButton then
-                clickButton(closeButton)
-            end
-            nextOpenCheck = now + RECHECK_COOLDOWN
-            return
-        end
-
-        local takeButton = getTakeButton(chestFrame)
-        if takeButton then
-            clickButton(takeButton)
-            log("[AutoChest] clicked TakeButton (" .. tostring(count) .. " items)")
-        end
-    elseif now >= nextOpenCheck then
-        local plot = getCurrentPlot()
-        local parts = plot and getPlotParts(plot)
-        local prompt = parts and parts.Chest and parts.Chest:FindFirstChildWhichIsA("ProximityPrompt", true)
-        if prompt then
-            teleport.To(prompt.Parent)
-
-            local ok, err = pcall(function()
-                fireproximityprompt(prompt, Enum.ProximityPromptInputType.Keyboard, prompt.HoldDuration)
-            end)
-            if not ok then
-                log("[AutoChest] fireproximityprompt error: " .. tostring(err))
-            end
-        end
-    end
+    task.spawn(runJob)
 end
 
 return autoChest
