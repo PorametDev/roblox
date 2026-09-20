@@ -168,7 +168,42 @@ local function surveyHolders()
         return a.power < b.power
     end)
 
-    return empty, occupied
+    return { empty = empty, occupied = occupied }
+end
+
+-- The scheduler asks HasWork every frame, and a survey walks every holder's
+-- descendants, so share one cached snapshot between it and Step.
+local cachedSurvey, cachedCandidates, cachedAt = nil, nil, 0
+
+local function look()
+    local now = tick()
+    if now - cachedAt > 1 then
+        cachedSurvey = surveyHolders()
+        cachedCandidates = getMinerSlots()
+        cachedAt = now
+    end
+    return cachedSurvey, cachedCandidates
+end
+
+-- "Still has work" means a free slot to fill, or a placed miner weaker than
+-- the best one waiting in the hotbar. Strictly weaker, so two equal miners
+-- can't swap back and forth forever.
+local function findNextAction()
+    local survey, candidates = look()
+    if not survey or not candidates or #candidates == 0 then
+        return nil
+    end
+
+    if #survey.empty > 0 then
+        return "fill", survey.empty[1], candidates[1]
+    end
+
+    local weakest = survey.occupied[1]
+    if weakest and candidates[1].power > weakest.power then
+        return "upgrade", weakest, candidates[1]
+    end
+
+    return nil
 end
 
 local autoPlace = {}
@@ -208,6 +243,12 @@ end
 
 function autoPlace.IsBusy()
     return busy
+end
+
+-- Tells the scheduler whether the plot still needs attention, so Auto Sell
+-- doesn't get a turn until every holder is filled and upgraded.
+function autoPlace.HasWork()
+    return (findNextAction()) ~= nil
 end
 
 -- Stand on the pad. Offsetting away put us outside the prompt's activation
@@ -307,6 +348,7 @@ local function runFillJob(target)
     end
 
     teleport.Return()
+    cachedAt = 0
     busy = false
 end
 
@@ -320,6 +362,7 @@ local function runUpgradeJob(target)
     end
 
     teleport.Return()
+    cachedAt = 0
     busy = false
 end
 
@@ -334,45 +377,29 @@ function autoPlace.Step()
     end
     lastAttempt = now
 
-    -- Everything here is a read: nothing moves the character until there's
-    -- actually something worth doing.
-    local empty, occupied = surveyHolders()
-    if not empty then
-        reason("not standing in any plot")
+    -- Every check above is a read: nothing moves the character until
+    -- there's actually something worth doing.
+    local action, target, best = findNextAction()
+    if not action then
+        reason("nothing to place or upgrade")
         return
     end
 
-    local candidates = getMinerSlots()
-    if #candidates == 0 then
-        reason("hotbar has no miner to place")
-        return
-    end
+    lastReason = nil
+    cachedAt = 0
 
-    if #empty > 0 then
-        lastReason = nil
+    if action == "fill" then
         task.spawn(function()
-            runFillJob(empty[1])
+            runFillJob(target)
         end)
         return
     end
 
-    -- Every slot is taken, so the only gain left is swapping out the
-    -- weakest one - and only when it's strictly weaker, otherwise an equal
-    -- pair would swap back and forth forever.
-    local weakest = occupied[1]
-    local best = candidates[1]
-
-    if weakest and best.power > weakest.power then
-        lastReason = nil
-        log("[AutoPlace] upgrading " .. weakest.holder.Name .. ": " .. weakest.name
-            .. " (" .. weakest.power .. ") -> " .. best.name .. " (" .. best.power .. ")")
-        task.spawn(function()
-            runUpgradeJob(weakest)
-        end)
-        return
-    end
-
-    reason("every holder already has something at least as strong as the hotbar's best")
+    log("[AutoPlace] upgrading " .. target.holder.Name .. ": " .. target.name
+        .. " (" .. target.power .. ") -> " .. best.name .. " (" .. best.power .. ")")
+    task.spawn(function()
+        runUpgradeJob(target)
+    end)
 end
 
 return autoPlace

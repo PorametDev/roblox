@@ -107,6 +107,20 @@ function autoChest.IsEnabled()
     return enabled
 end
 
+-- The scheduler asks this every frame to decide whose turn it is, so cache
+-- the billboard read rather than walking the chest's descendants 60x a
+-- second.
+local cachedCount, cachedAt = nil, 0
+
+function autoChest.HasWork()
+    local now = tick()
+    if now - cachedAt > 1 then
+        cachedCount = getChestCount()
+        cachedAt = now
+    end
+    return cachedCount ~= nil and cachedCount >= MIN_ITEMS_TO_COLLECT
+end
+
 -- The scheduler holds everyone else off while a job is mid-flight.
 function autoChest.IsBusy()
     return busy
@@ -170,6 +184,7 @@ local function runJob()
     end
 
     teleport.Return()
+    cachedAt = 0
     busy = false
 end
 

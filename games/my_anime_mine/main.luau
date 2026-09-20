@@ -47,10 +47,14 @@ return function(import)
     scheduler.RegisterStandalone("AutoUpgrade", autoUpgrade.Step, autoUpgrade.IsEnabled)
 
     -- Exclusive: each needs the character standing somewhere specific (the
-    -- server checks real position) or a menu open on screen, so they take
-    -- turns and never overlap.
-    scheduler.RegisterExclusive("AutoPlace", autoPlace.Step, autoPlace.IsEnabled, autoPlace.IsBusy)
-    scheduler.RegisterExclusive("AutoChest", autoChest.Step, autoChest.IsEnabled, autoChest.IsBusy)
+    -- server checks real position) or a menu open on screen, so only one
+    -- runs at a time. Registration order IS the priority order - collect
+    -- the chest, then fill and upgrade every holder, and only sell once
+    -- there's nothing left to place. Auto Sell has no HasWork check (you
+    -- can't tell what's sellable without opening the menu), so it goes last
+    -- and picks up whatever time the others aren't using.
+    scheduler.RegisterExclusive("AutoChest", autoChest.Step, autoChest.IsEnabled, autoChest.IsBusy, autoChest.HasWork)
+    scheduler.RegisterExclusive("AutoPlace", autoPlace.Step, autoPlace.IsEnabled, autoPlace.IsBusy, autoPlace.HasWork)
     scheduler.RegisterExclusive("AutoSell", autoSell.Step, autoSell.IsEnabled, autoSell.IsBusy)
 
     scheduler.Start()

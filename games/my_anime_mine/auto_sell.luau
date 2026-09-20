@@ -73,6 +73,43 @@ local function clickButton(button)
     return ok
 end
 
+-- A ticked card gains a SelectOverlay; unticked ones don't have one.
+local function isCardSelected(card)
+    local content = card:FindFirstChild("Content")
+    local overlay = content and content:FindFirstChild("SelectOverlay")
+    return overlay ~= nil and overlay.Visible
+end
+
+-- Only clicks cards actually rendered inside the scroll's bounds - a real
+-- mouse click at the position of a card scrolled out of view would land on
+-- whatever happens to be there instead.
+local function isOnScreen(card, scroll)
+    local top = scroll.AbsolutePosition.Y
+    local bottom = top + scroll.AbsoluteSize.Y
+    local cardTop = card.AbsolutePosition.Y
+    local cardBottom = cardTop + card.AbsoluteSize.Y
+    return cardTop >= top and cardBottom <= bottom
+end
+
+local function selectUnselectedCards(sellFrame)
+    local content = sellFrame:FindFirstChild("Content")
+    local scroll = content and content:FindFirstChild("Scroll")
+    if not scroll then
+        return 0
+    end
+
+    local selected = 0
+    for _, card in ipairs(scroll:GetChildren()) do
+        if card.Name == "Card" and not isCardSelected(card) and isOnScreen(card, scroll) then
+            clickButton(card)
+            selected = selected + 1
+            task.wait(0.1)
+        end
+    end
+
+    return selected
+end
+
 local function getSellStandPromptPart()
     local sellStand = Workspace:FindFirstChild("SellStand")
     local prompt = sellStand and sellStand:FindFirstChildWhichIsA("ProximityPrompt", true)
@@ -170,6 +207,16 @@ local function runJob()
     if selectAllButton and labelText(selectAllButton) == "Select All" then
         clickButton(selectAllButton)
         log("[AutoSell] clicked SelectAllButton (" .. cardCount .. " cards)")
+        task.wait(0.2)
+    end
+
+    -- "Select All" only ticks the ores - every unit card stays unchecked and
+    -- has to be clicked individually. Safe to sweep them all up because
+    -- Auto Place runs to completion first, so whatever's still here is
+    -- surplus.
+    local selected = selectUnselectedCards(sellFrame)
+    if selected > 0 then
+        log("[AutoSell] also selected " .. selected .. " unit card(s) Select All skipped")
     end
 
     -- The Sell label may animate a price count-up before it reads
