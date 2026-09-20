@@ -114,6 +114,15 @@ function UI:AddTab(name, icon, opts)
     tabButton.Parent = self.TabBar
     corner(tabButton, RADIUS.Control)
 
+    -- Card and Background are close enough in the light theme that an
+    -- inactive tab button is nearly invisible against the window without
+    -- an outline - this is what makes it look "missing" rather than just
+    -- unstyled.
+    local tabStroke = Instance.new("UIStroke")
+    tabStroke.Color = THEME.ToggleOff
+    tabStroke.Thickness = 1
+    tabStroke.Parent = tabButton
+
     local icoLabel = Instance.new("TextLabel")
     icoLabel.BackgroundTransparency = 1
     icoLabel.Size = UDim2.new(1, 0, 1, 0)
