@@ -33,6 +33,9 @@ local Workspace = game:GetService("Workspace")
 local log = import("core/logger")
 
 local api = {}
+-- Never sell a character good enough to be worth placing. Off would mean
+-- reverting to the behaviour that sold the best unit in the inventory.
+local protectUsefulUnits = true
 local gameState, mineInventory, mineConfig, mineStock, items, indexRewards
 local loadFailed = false
 
@@ -60,6 +63,10 @@ local function modules()
     end
 
     return true
+end
+
+function api.SetProtectUsefulUnits(state)
+    protectUsefulUnits = state
 end
 
 function api.IsReady()
@@ -384,11 +391,37 @@ function api.SellableKeys()
         return {}
     end
 
+    -- Anything at least as good as the weakest character currently on a
+    -- holder is upgrade material, not surplus. Without this a 305.2K Gear
+    -- 5 Lufy went to the buyer while level-38 Warped Ninjas kept mining,
+    -- because it hadn't been placed yet and so counted as stock.
+    --
+    -- Ores are never affected; this only ever spares Character entries.
+    local floorDamage = nil
+    if protectUsefulUnits then
+        for holderKey, holder in pairs(mine.Holders or {}) do
+            if type(holder) == "table" and holder.CharName then
+                local base = api.HolderBaseDamage(holderKey)
+                if base and (not floorDamage or base < floorDamage) then
+                    floorDamage = base
+                end
+            end
+        end
+    end
+
     local keys = {}
     for _, entry in pairs(entries) do
         local count = entry.SellCount or entry.Count or 0
         if count > 0 and (entry.Worth or 0) > 0 and entry.Key then
-            table.insert(keys, entry.Key)
+            local spare = false
+            if floorDamage and entry.Kind == "Character" then
+                local base = api.CharacterBaseDamage(entry.Name)
+                spare = base ~= nil and base >= floorDamage
+            end
+
+            if not spare then
+                table.insert(keys, entry.Key)
+            end
         end
     end
     return keys
@@ -734,6 +767,40 @@ function api.StatInfo(holderKey, stat)
     end)
 
     return info
+end
+
+-- A character's damage BEFORE any level, pickaxe, mutation or enchant
+-- multiplier - the number printed on its hotbar card.
+--
+-- This is the right basis for "is that unit better than this one", because
+-- levels are bought and mutations are rolled, but a character's base
+-- damage is fixed. A level-56 Warped Ninja out-hits a level-1 Gear 5 Lufy
+-- today and loses to it badly once both are levelled, so comparing what
+-- they currently hit for picks the wrong one permanently.
+function api.CharacterBaseDamage(charName)
+    if not modules() or type(charName) ~= "string" or charName == "" then
+        return nil
+    end
+
+    local ok, damage = pcall(function()
+        local itemData = items.GetItemData(charName)
+        if not itemData then
+            return nil
+        end
+        return tonumber(mineConfig.GetCharacterDamage(itemData))
+    end)
+
+    return ok and damage or nil
+end
+
+-- Same figure for whoever is standing on a holder.
+function api.HolderBaseDamage(holderKey)
+    local mine = api.GetMineData()
+    local holder = mine and (mine.Holders or {})[holderKey]
+    if not (holder and holder.CharName) then
+        return nil
+    end
+    return api.CharacterBaseDamage(holder.CharName)
 end
 
 -- MineConfig.GetMutationRollCost(item, mineGame) - the number the Roll

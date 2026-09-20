@@ -156,13 +156,24 @@ local function surveyHolders()
                 table.insert(summary, holder.Name .. "=empty")
                 table.insert(empty, { holder = holder, prompt = prompt })
             else
-                local power = readPlacedPower(holder) or 0
-                table.insert(summary, holder.Name .. "=" .. prompt.ObjectText .. "(" .. power .. ")")
+                -- Two different numbers, and mixing them up is what
+                -- lost a Gear 5 Lufy. `shown` is what the billboard says:
+                -- damage AFTER this holder's level, pickaxe and mutation
+                -- multipliers. `power` is the character's BASE damage,
+                -- the same basis the hotbar cards use, so the two are
+                -- comparable. Levels are bought; the character isn't.
+                local shown = readPlacedPower(holder) or 0
+                local base = gameApi.HolderBaseDamage(holder.Name)
+                    or gameApi.CharacterBaseDamage(prompt.ObjectText)
+                    or shown
+                table.insert(summary, holder.Name .. "=" .. prompt.ObjectText
+                    .. "(" .. shown .. ", base " .. math.floor(base) .. ")")
                 table.insert(occupied, {
                     holder = holder,
                     prompt = prompt,
                     name = prompt.ObjectText,
-                    power = power,
+                    power = base,
+                    shown = shown,
                 })
             end
         end
@@ -197,9 +208,15 @@ local function look()
     return cachedSurvey, cachedCandidates
 end
 
--- "Still has work" means a free slot to fill, or a placed miner weaker than
--- the best one waiting in the hotbar. Strictly weaker, so two equal miners
--- can't swap back and forth forever.
+-- "Still has work" means a free slot to fill, or a placed miner whose
+-- CHARACTER is weaker than the best one waiting in the hotbar - base
+-- damage against base damage. Strictly weaker, so two equal miners can't
+-- swap back and forth forever.
+--
+-- Comparing current damage instead would keep a levelled-up weak unit
+-- forever, exactly as reported: at equal level the better character wins
+-- every time, so the levels the old one happens to have are not a reason
+-- to keep it.
 local function findNextAction()
     local survey, candidates = look()
     if not survey or not candidates or #candidates == 0 then

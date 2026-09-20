@@ -12,12 +12,47 @@
 -- would no longer let us hold) and Auto Place needs somewhere to fall back
 -- to instead of pressing a dead key forever.
 --
+-- The power on the card is the character's BASE damage, and it's
+-- abbreviated: "305.2K", "48.8K", "1.2K". Stripping non-digits out of that
+-- gives 305.2 and 48.8 - three orders of magnitude too small - so every
+-- hotbar unit looked feebler than anything already placed, Auto Place
+-- decided nothing was worth swapping, and Auto Sell then sold a 305.2K
+-- Gear 5 Lufy as surplus. The log said so plainly and I read past it:
+--
+--   [BestMiner] slot 4: One Arm Pirates power 48.8 x3
+--
+-- So the number comes from the game's data now - Items.GetItemData plus
+-- MineConfig.GetCharacterDamage - with suffix-aware text parsing only as a
+-- fallback for cards whose name doesn't resolve.
+--
 -- Only covers what's on the hotbar; anything still in the bag would need
 -- the inventory screen opened first.
 return function(import)
 
 local Players = game:GetService("Players")
+local gameApi = import("games/my_anime_mine/game_api")(import)
 local log = import("core/logger")
+
+local SUFFIXES = {
+    K = 1e3, M = 1e6, B = 1e9, T = 1e12, Qa = 1e15, Qi = 1e18,
+}
+
+local function parsePower(text)
+    local number, suffix = text:match("([%d,%.]+)%s*(%a*)")
+    if not number then
+        return 0
+    end
+
+    local value = tonumber((number:gsub(",", ""))) or 0
+    if suffix ~= "" then
+        local multiplier = SUFFIXES[suffix]
+            or SUFFIXES[suffix:sub(1, 1):upper() .. suffix:sub(2)]
+        -- An unknown suffix is a BIGGER unit than we know, so guessing
+        -- small here would repeat the original mistake.
+        value = value * (multiplier or 1)
+    end
+    return value
+end
 
 local reported = {}
 
@@ -57,9 +92,12 @@ local function readSlot(slotFrame)
         return nil
     end
 
+    local name = nameLabel.Text
+
     return {
-        name = nameLabel.Text,
-        power = tonumber((damageLabel.Text:gsub("[^%d%.]", ""))) or 0,
+        name = name,
+        -- The game's own figure first; the card text is only a fallback.
+        power = gameApi.CharacterBaseDamage(name) or parsePower(damageLabel.Text),
         count = readCount(slotFrame),
     }
 end

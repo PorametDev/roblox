@@ -141,6 +141,11 @@ return function(import)
         "Auto Sell",
         "ไปที่ SellStand แล้วกด Select All + Sell อัตโนมัติทุก 45 วินาที"
     ), "autoSell", autoSell.SetEnabled)
+    persistentToggle(
+        farmTab:AddCard("Auto Sell: ไม่ขาย unit ที่ดีพอจะวาง",
+            "ตัวที่ base damage สูงกว่าตัวที่อ่อนที่สุดบน holder = ของไว้อัปเกรด ไม่ใช่ของเหลือ"),
+        "autoSellProtectUnits", gameApi.SetProtectUsefulUnits, true
+    )
     persistentSlider(farmTab, "Auto Sell: รอบขาย", "ขายทุกกี่วินาที",
         5, 300, "autoSellInterval", 20, autoSell.SetCheckInterval, "s")
     -- Read once at registration, so this one only takes effect on reload.
