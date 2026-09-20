@@ -15,6 +15,7 @@ return function(import)
     local dumpInstance = import("games/my_anime_mine/debug_dump")
     local dumpRemotes = import("games/my_anime_mine/debug_dump_remotes")(import)
     local dumpSellCards = import("games/my_anime_mine/debug_dump_sell_cards")(import)
+    local dumpGui = import("games/my_anime_mine/debug_dump_gui")(import)
     local autoMine = import("games/my_anime_mine/auto_mine")(import)
     local autoPlace = import("games/my_anime_mine/auto_place")(import)
     local autoChest = import("games/my_anime_mine/auto_chest")(import)
@@ -163,6 +164,16 @@ return function(import)
     sellCardsDumpBtn = sellCardsDumpCard:AddButton("Dump", function()
         local count = dumpSellCards()
         sellCardsDumpBtn.Text = count .. " cards"
+    end)
+
+    local guiDumpCard = farmTab:AddCard(
+        "Debug: Dump Visible GUI",
+        "เปิดหน้าจอที่อยากดูก่อน (เช่นหน้า Take All ตอนเปิด chest) แล้วกดปุ่มนี้"
+    )
+    local guiDumpBtn
+    guiDumpBtn = guiDumpCard:AddButton("Dump", function()
+        dumpGui()
+        guiDumpBtn.Text = "Done"
     end)
 
     local settingsTab = window:AddTab("ตั้งค่า", "⚙")
