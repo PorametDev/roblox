@@ -12,6 +12,7 @@ return function(import)
     local getPlotParts = import("games/my_anime_mine/get_plot_parts")
     local dumpInstance = import("games/my_anime_mine/debug_dump")
     local autoMine = import("games/my_anime_mine/auto_mine")(import)
+    local autoPlace = import("games/my_anime_mine/auto_place")(import)
 
     local farmTab = window:AddTab("ฟาร์ม", "🏠")
 
@@ -20,6 +21,13 @@ return function(import)
         "กดหินอัตโนมัติทุก Node ใน plot ปัจจุบัน (ยิง ClickDetector 'NodeClick')"
     ):AddToggle(false, function(state)
         autoMine.SetEnabled(state)
+    end)
+
+    farmTab:AddCard(
+        "Auto Place Miner",
+        "หยิบ miner จาก Backpack ไปวางลง Holder ที่ว่างอัตโนมัติ"
+    ):AddToggle(false, function(state)
+        autoPlace.SetEnabled(state)
     end)
 
     local debugCard = farmTab:AddCard("Debug: Current Plot", "กดเพื่อเช็ค plot ปัจจุบัน (ผลขึ้นตรงบนปุ่มเอง ไม่ต้องพึ่ง console)")
