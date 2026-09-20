@@ -54,6 +54,7 @@ return function(import)
     local autoSell = import("games/my_anime_mine/auto_sell")(import)
     local autoUpgrade = import("games/my_anime_mine/auto_upgrade")(import)
     local autoResearch = import("games/my_anime_mine/auto_research")(import)
+    local autoClaim = import("games/my_anime_mine/auto_claim")(import)
     local gameApi = import("games/my_anime_mine/game_api")(import)
 
     -- Standalone: only fires ClickDetectors, which ignore distance, so
@@ -72,15 +73,23 @@ return function(import)
     scheduler.RegisterExclusive("AutoPlace", autoPlace.Step, autoPlace.IsEnabled, autoPlace.IsBusy, autoPlace.HasWork)
     scheduler.RegisterExclusive("AutoUpgrade", autoUpgrade.Step, autoUpgrade.IsEnabled, autoUpgrade.IsBusy, autoUpgrade.HasWork)
     scheduler.RegisterExclusive("AutoResearch", autoResearch.Step, autoResearch.IsEnabled, autoResearch.IsBusy, autoResearch.HasWork)
+    scheduler.RegisterExclusive("AutoClaim", autoClaim.Step, autoClaim.IsEnabled, autoClaim.IsBusy, autoClaim.HasWork)
 
-    -- Sell runs last, as asked - but last must not mean never. The 04:01
-    -- log has Auto Chest and Auto Upgrade trading turns for four minutes
-    -- with Auto Sell not getting a single one, and since selling is what
-    -- produces the money the other two spend, strict priority was quietly
-    -- strangling the whole loop. The wait cap is the floor under that: if
-    -- Auto Sell has had something to sell for 90 seconds and still hasn't
-    -- been given a turn, it takes one.
-    scheduler.RegisterExclusive("AutoSell", autoSell.Step, autoSell.IsEnabled, autoSell.IsBusy, autoSell.HasWork, 90)
+    -- Sell stays last in the order, but "place before sell" is now stated
+    -- as a dependency instead of relying on that position: Auto Sell
+    -- refuses to run while Auto Place still has holders to fill, so the
+    -- units it would have sold are safe no matter who gets the turn.
+    --
+    -- That's what makes it safe to let Sell jump the queue quickly. At 90
+    -- seconds it ran once while the chest refilled six times over, so
+    -- there was never any money and every upgrade pass could afford
+    -- exactly one thing. Selling is the faucet; starving it starves
+    -- everything downstream.
+    autoSell.SetHoldWhile(function()
+        return autoPlace.IsEnabled() and autoPlace.HasWork()
+    end)
+    local sellMaxWait = config.Get("autoSellMaxWait", 20)
+    scheduler.RegisterExclusive("AutoSell", autoSell.Step, autoSell.IsEnabled, autoSell.IsBusy, autoSell.HasWork, sellMaxWait)
 
     scheduler.Start()
 
@@ -124,8 +133,14 @@ return function(import)
         "Auto Sell",
         "ไปที่ SellStand แล้วกด Select All + Sell อัตโนมัติทุก 45 วินาที"
     ), "autoSell", autoSell.SetEnabled)
-    persistentSlider(farmTab, "Auto Sell: รอบขาย", "ไปขายทุกกี่วินาที (ต้องเปิดเมนูทุกครั้ง)",
-        10, 300, "autoSellInterval", 45, autoSell.SetCheckInterval, "s")
+    persistentSlider(farmTab, "Auto Sell: รอบขาย", "ขายทุกกี่วินาที",
+        5, 300, "autoSellInterval", 20, autoSell.SetCheckInterval, "s")
+    -- Read once at registration, so this one only takes effect on reload.
+    farmTab:AddSlider("Auto Sell: รอคิวได้นานสุด",
+        "ถ้าโดนงานอื่นแซงเกินเวลานี้จะแทรกคิวเอง (มีผลหลังโหลดใหม่)",
+        5, 120, sellMaxWait, function(value)
+            config.Set("autoSellMaxWait", value)
+        end, "s")
 
     persistentToggle(farmTab:AddCard(
         "Auto Upgrade Unit",
@@ -235,6 +250,15 @@ return function(import)
         "autoResearchCheapestFirst", 1, autoResearch.SetCheapestFirst
     )
 
+    persistentToggle(farmTab:AddCard(
+        "Auto Claim (Index)",
+        "เก็บรางวัล Index ที่ถึงเกณฑ์แล้วผ่าน remote ตรง (ไม่เปิด UI)"
+    ), "autoClaim", autoClaim.SetEnabled)
+    persistentSlider(farmTab, "Auto Claim: รอบเช็ค", "เช็ครางวัลที่เก็บได้ทุกกี่วินาที",
+        5, 300, "autoClaimInterval", 30, autoClaim.SetCheckInterval, "s")
+    persistentSlider(farmTab, "Auto Claim: เก็บสูงสุดต่อรอบ", "เกมเว้น 0.6 วิต่อการเก็บหนึ่งครั้ง",
+        1, 30, "autoClaimMaxPerPass", 10, autoClaim.SetMaxPerPass, "x")
+
     -- The debug tab is built by core/debug_tab and only when this is a dev
     -- build. In a prod bundle scripts/build.py leaves every core/debug_*
     -- module out of the output entirely, so this import has to stay inside
@@ -285,6 +309,7 @@ return function(import)
         autoSell.SetEnabled(false)
         autoUpgrade.SetEnabled(false)
         autoResearch.SetEnabled(false)
+        autoClaim.SetEnabled(false)
         if stopDebug then
             stopDebug()
         end

@@ -24,7 +24,9 @@
 -- pickaxes.
 return function(import)
 
+local Workspace = game:GetService("Workspace")
 local gameApi = import("games/my_anime_mine/game_api")(import)
+local teleport = import("core/teleport")
 local log = import("core/logger")
 
 -- The screen labels these Damage / Speed / Mining; the server wants
@@ -236,17 +238,76 @@ local function ownedCountOf(name)
     return 0
 end
 
+-- MineHUDClient finds the shop at workspace.PickaxesStand["Shop Stand"],
+-- which is where its alert billboard hangs.
+local function getPickaxeStandPart()
+    local stand = Workspace:FindFirstChild("PickaxesStand")
+    local shop = stand and stand:FindFirstChild("Shop Stand")
+    if not shop then
+        return nil
+    end
+    if shop:IsA("BasePart") then
+        return shop
+    end
+    return shop:FindFirstChildWhichIsA("BasePart", true)
+end
+
+-- Same shape as Auto Sell's answer to the same question, for the same
+-- reason: MineSellItems turned out to be position-checked server-side and
+-- MineBuyPickaxe may well be too. Rather than assume either way, try it
+-- from where we stand once, and if the purchase silently fails, teleport
+-- and retry - then remember which it was for the rest of the session.
+--
+-- nil = not yet known, true = must stand at the stand, false = works from
+-- anywhere.
+local needsProximity = nil
+
+local function sendBuy(pickaxe)
+    local before = ownedCountOf(pickaxe.name)
+    gameApi.BuyPickaxe(pickaxe.index)
+    task.wait(0.4)
+    return ownedCountOf(pickaxe.name) > before
+end
+
 local function tryPickaxe()
     local pickaxe = findPickaxe()
     if not pickaxe then
         return false
     end
 
-    local before = pickaxe.ownedCount
-    gameApi.BuyPickaxe(pickaxe.index)
-    task.wait(0.4)
+    local bought = false
 
-    if ownedCountOf(pickaxe.name) > before then
+    if needsProximity ~= true then
+        bought = sendBuy(pickaxe)
+
+        if needsProximity == nil then
+            needsProximity = not bought
+            log("[AutoUpgrade] MineBuyPickaxe "
+                .. (bought and "works from anywhere - no teleport needed"
+                           or "may need us at the stand - trying that"))
+        end
+    end
+
+    if not bought then
+        local part = getPickaxeStandPart()
+        if part then
+            teleport.To(part)
+            task.wait(0.4)
+            bought = sendBuy(pickaxe)
+            teleport.Return()
+
+            -- If it only worked after teleporting, proximity really is the
+            -- requirement; if it failed both ways it was stock or money,
+            -- so don't lock in a teleport we may not need.
+            if not bought then
+                needsProximity = nil
+            end
+        else
+            log("[AutoUpgrade] can't find workspace.PickaxesStand['Shop Stand']")
+        end
+    end
+
+    if bought then
         log("[AutoUpgrade] bought pickaxe #" .. pickaxe.index .. " " .. pickaxe.name
             .. " (x" .. pickaxe.multiplier .. ")")
         return true

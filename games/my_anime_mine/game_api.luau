@@ -608,6 +608,114 @@ function api.ClaimableIndexTiers()
     return tonumber(result.Total) or 0
 end
 
+-- Index rewards. MineIndexClient hides the claim behind a config lookup
+-- rather than a literal, which is why grepping the first six decompiled
+-- scripts for an event name turned up nothing:
+--
+--   GameState.SendEvent(MineIndexRewardsConfig.Events.Claim,
+--                       category, tierKey, rewardIndex)
+--
+-- A tier is claimable when it's Reached, not already Claimed, and that
+-- particular reward slot isn't in ClaimedRewards. The client also spaces
+-- its own claims 0.6s apart, so this does too.
+--
+-- "Held" names feed into State because owning a character counts towards
+-- the index whether it's in storage or standing on a holder.
+local function heldCharacterNames(mine)
+    local held = {}
+
+    for stackKey, count in pairs(mine.Characters or {}) do
+        if type(count) == "number" and count > 0 then
+            local ok, name = pcall(mineConfig.ParseCharStack, stackKey)
+            if ok and type(name) == "string" then
+                held[name] = true
+            end
+        end
+    end
+
+    for _, holder in pairs(mine.Holders or {}) do
+        if type(holder) == "table" and type(holder.CharName) == "string" then
+            held[holder.CharName] = true
+        end
+    end
+
+    return held
+end
+
+-- The tabs are every zone plus the special categories; each maps to a
+-- category record whose .Key is the first argument to the claim event.
+local function indexCategoryKeys()
+    local keys = {}
+    local seen = {}
+
+    for _, zoneKey in ipairs(api.ZoneKeys()) do
+        local ok, category = pcall(indexRewards.Category, zoneKey)
+        if ok and type(category) == "table" and category.Key and not seen[category.Key] then
+            seen[category.Key] = true
+            table.insert(keys, category.Key)
+        end
+    end
+
+    return keys
+end
+
+-- Every reward sitting there waiting, as { category, tierKey, index }.
+function api.ClaimableIndexRewards()
+    if not modules() then
+        return {}
+    end
+
+    local mine = api.GetMineData()
+    if not mine or indexRewards.Enabled ~= true then
+        return {}
+    end
+
+    local list = {}
+
+    pcall(function()
+        local held = heldCharacterNames(mine)
+
+        for _, category in ipairs(indexCategoryKeys()) do
+            local total = tonumber(indexRewards.Total(category)) or 0
+            if total > 0 then
+                local state = indexRewards.State(mine, category, held)
+
+                for _, tier in ipairs((state and state.Track) or {}) do
+                    if tier.Reached and not tier.Claimed then
+                        local claimed = tier.ClaimedRewards or {}
+                        for index in ipairs(tier.Rewards or {}) do
+                            if not claimed[index] then
+                                table.insert(list, {
+                                    category = category,
+                                    tierKey = tier.Key,
+                                    index = index,
+                                })
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+
+    return list
+end
+
+function api.ClaimIndexReward(reward)
+    if not modules() then
+        return false
+    end
+
+    local ok, eventName = pcall(function()
+        return indexRewards.Events.Claim
+    end)
+    if not ok or type(eventName) ~= "string" then
+        return false
+    end
+
+    return send(eventName, reward.category, reward.tierKey, reward.index)
+end
+
 return api
 
 end

@@ -27,6 +27,10 @@ local autoSell = {}
 local enabled = false
 local busy = false
 local lastAttempt = 0
+-- Set by main: "don't sell while this is true". Auto Place fills holders
+-- from the same inventory this sells out of, so selling mid-placement
+-- would sell the units meant for the empty slots.
+local holdWhile = nil
 -- Starts unknown; the first sale from where we stand answers it, and the
 -- answer holds for the session.
 local needsProximity = nil
@@ -60,7 +64,24 @@ function autoSell.SetCheckInterval(seconds)
     checkInterval = math.max(seconds, 5)
 end
 
+-- Expressing "place before sell" as a direct dependency rather than as a
+-- position in the priority list. Ordering alone couldn't do the job: with
+-- strict priority Auto Sell sat behind Chest, Place, Upgrade and Research,
+-- all of which always had something to do, so it ran once every ninety
+-- seconds while the chest refilled every fifteen. Nothing was being sold,
+-- so there was no money, so every upgrade pass could afford exactly one
+-- thing - which is what "กว่ามันจะซื้อก็นานมาก" actually was.
+--
+-- With the dependency stated outright, Auto Sell can be allowed to run
+-- often without ever selling a unit that Auto Place still wants.
+function autoSell.SetHoldWhile(predicate)
+    holdWhile = predicate
+end
+
 function autoSell.HasWork()
+    if holdWhile and holdWhile() then
+        return false
+    end
     return #gameApi.SellableKeys() > 0
 end
 
