@@ -34,8 +34,24 @@ local function findHolderPrompt(holder)
     return pad and pad:FindFirstChildWhichIsA("ProximityPrompt", true)
 end
 
+-- A locked holder still reads "Empty miner slot" but has its prompt
+-- disabled - H3 is one, and without this check Auto Place hammered it
+-- forever while the usable holders sat untouched.
+local function isHolderUsable(prompt)
+    return prompt ~= nil and prompt.Enabled and prompt.ObjectText == EMPTY_SLOT_TEXT
+end
+
 local function isHolderEmpty(prompt)
     return prompt ~= nil and prompt.ObjectText == EMPTY_SLOT_TEXT
+end
+
+local function distanceTo(part)
+    local character = Players.LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if not (hrp and part) then
+        return nil
+    end
+    return (hrp.Position - part.Position).Magnitude
 end
 
 local function findEmptyHolder()
@@ -47,7 +63,7 @@ local function findEmptyHolder()
 
     for _, holder in ipairs(parts.Holders:GetChildren()) do
         local prompt = findHolderPrompt(holder)
-        if isHolderEmpty(prompt) then
+        if isHolderUsable(prompt) then
             return holder, prompt
         end
     end
@@ -128,15 +144,36 @@ local function runJob(holder, prompt, candidates)
     teleport.To(prompt.Parent, Vector3.new(0, 3, 0))
     task.wait(0.3)
 
-    -- Walk down from the strongest: an emptied stack still shows a card the
-    -- game won't let us hold, which had Auto Place pressing a dead key over
-    -- and over instead of reaching for the next miner.
+    -- Cycling all nine slots took ~5 seconds, long enough for the character
+    -- to end up 128 studs from the pad while we were still pressing keys.
+    -- Confirm we actually landed before spending any time here.
+    local arrived = distanceTo(prompt.Parent)
+    if arrived and arrived > prompt.MaxActivationDistance then
+        log(string.format("[AutoPlace] teleport didn't land: %.1f studs from %s (max %s), skipping",
+            arrived, holder.Name, tostring(prompt.MaxActivationDistance)))
+        teleport.Return()
+        busy = false
+        return
+    end
+
+    -- Walk down from the strongest, but give up as soon as we've drifted
+    -- out of range rather than pressing keys into nothing.
     local miner = nil
     for _, candidate in ipairs(candidates) do
         if holdMiner(prompt, candidate) then
             miner = candidate
             break
         end
+
+        local distance = distanceTo(prompt.Parent)
+        if distance and distance > prompt.MaxActivationDistance then
+            log(string.format("[AutoPlace] drifted %.1f studs from %s while selecting, aborting",
+                distance, holder.Name))
+            teleport.Return()
+            busy = false
+            return
+        end
+
         log("[AutoPlace] slot " .. candidate.slot .. " (" .. candidate.name
             .. ") didn't take, trying the next one")
     end
@@ -146,14 +183,10 @@ local function runJob(holder, prompt, candidates)
     -- record why the hint never arrived so a repeat failure is diagnosable.
     if not miner then
         miner = candidates[1]
-        local character = Players.LocalPlayer.Character
-        local hrp = character and character:FindFirstChild("HumanoidRootPart")
-        local distance = hrp and (hrp.Position - prompt.Parent.Position).Magnitude
         log(string.format(
-            "[AutoPlace] no slot reported ready (prompt '%s', enabled=%s, maxDistance=%s, we're %s studs away) - trying %s anyway",
+            "[AutoPlace] no slot reported ready (prompt '%s', enabled=%s, %s studs away) - trying %s anyway",
             tostring(prompt.ActionText), tostring(prompt.Enabled),
-            tostring(prompt.MaxActivationDistance),
-            distance and string.format("%.1f", distance) or "?",
+            distanceTo(prompt.Parent) and string.format("%.1f", distanceTo(prompt.Parent)) or "?",
             miner.name
         ))
     end
