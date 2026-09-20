@@ -6,6 +6,7 @@ return function(import)
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
 local log = import("core/logger")
 
 local interactionLogger = {}
@@ -85,6 +86,15 @@ function interactionLogger.SetEnabled(enabled)
     table.insert(connections, playerGui.DescendantAdded:Connect(function(descendant)
         if descendant:IsA("GuiButton") then
             watchButton(descendant, connections)
+        end
+    end))
+
+    table.insert(connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            log(string.format(
+                "[Interaction] Key pressed: %s (gameProcessed=%s)",
+                input.KeyCode.Name, tostring(gameProcessed)
+            ))
         end
     end))
 end
