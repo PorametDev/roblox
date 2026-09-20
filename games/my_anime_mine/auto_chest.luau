@@ -55,14 +55,20 @@ function autoChest.SetEnabled(enabled)
         end
 
         if claimOre then
-            pcall(function()
+            local ok, err = pcall(function()
                 claimOre:FireServer()
             end)
+            if not ok then
+                log("[AutoChest] ClaimOre:FireServer() error: " .. tostring(err))
+            end
         end
         if collectAll then
-            pcall(function()
+            local ok, err = pcall(function()
                 collectAll:FireServer()
             end)
+            if not ok then
+                log("[AutoChest] CollectAll:FireServer() error: " .. tostring(err))
+            end
         end
     end)
 end
