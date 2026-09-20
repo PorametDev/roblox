@@ -17,6 +17,8 @@ return function(import)
     local autoPlace = import("games/my_anime_mine/auto_place")(import)
     local autoTakeChest = import("games/my_anime_mine/auto_take_chest")(import)
     local autoOpenChest = import("games/my_anime_mine/auto_open_chest")(import)
+    local autoSell = import("games/my_anime_mine/auto_sell")(import)
+    local autoUpgrade = import("games/my_anime_mine/auto_upgrade")(import)
 
     local farmTab = window:AddTab("ฟาร์ม", "🏠")
 
@@ -39,6 +41,20 @@ return function(import)
         "กด ChestPrompt ให้อัตโนมัติ เพื่อให้หน้า Take All โผล่ขึ้นมา"
     ):AddToggle(false, function(state)
         autoOpenChest.SetEnabled(state)
+    end)
+
+    farmTab:AddCard(
+        "Auto Sell",
+        "เดินไปกด SellStand แล้วกด SelectAllButton อัตโนมัติ (ยังไม่ยืนยันว่าขายจริงหรือแค่เลือก)"
+    ):AddToggle(false, function(state)
+        autoSell.SetEnabled(state)
+    end)
+
+    farmTab:AddCard(
+        "Auto Upgrade",
+        "กด UpgradeClick ทุก Holder อัตโนมัติเมื่อมีเงินพอ"
+    ):AddToggle(false, function(state)
+        autoUpgrade.SetEnabled(state)
     end)
 
     local debugCard = farmTab:AddCard("Debug: Current Plot", "กดเพื่อเช็ค plot ปัจจุบัน (ผลขึ้นตรงบนปุ่มเอง ไม่ต้องพึ่ง console)")
@@ -156,5 +172,7 @@ return function(import)
         autoOpenChest.SetEnabled(false)
         antiAfk.SetEnabled(false)
         interactionLogger.SetEnabled(false)
+        autoSell.SetEnabled(false)
+        autoUpgrade.SetEnabled(false)
     end)
 end
