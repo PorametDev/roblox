@@ -1,32 +1,17 @@
+-- Fires ClaimOre and CollectAll directly (found via Debug: Dump All
+-- Remotes) instead of finding and simulating a click on the "Take All"
+-- GUI button - no UI dependency at all now.
 return function(import)
 
-local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local log = import("core/logger")
 
 local FIRE_INTERVAL = 0.5
 
--- Searches by text instead of a fixed path, since the chest popup's GUI
--- tree isn't something we control and could be nested differently than
--- what we saw once in Explorer.
-local function findButtonByText(instance, text)
-    for _, descendant in ipairs(instance:GetDescendants()) do
-        if descendant:IsA("TextButton") and descendant.Visible then
-            if descendant.Text:lower():find(text, 1, true) then
-                return descendant
-            end
-        end
-    end
-    return nil
-end
-
-local function clickButton(button)
-    if not firesignal then
-        return false, "firesignal is not available on this executor"
-    end
-    pcall(firesignal, button.MouseButton1Click)
-    pcall(firesignal, button.Activated)
-    return true
+local function getRemote(name)
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    return remotes and remotes:FindFirstChild(name)
 end
 
 local autoTakeChest = {}
@@ -44,7 +29,13 @@ function autoTakeChest.SetEnabled(enabled)
         return
     end
 
-    log("[AutoTakeChest] enabled")
+    local claimOre = getRemote("ClaimOre")
+    local collectAll = getRemote("CollectAll")
+    log(string.format(
+        "[AutoTakeChest] enabled (ClaimOre=%s, CollectAll=%s)",
+        tostring(claimOre ~= nil), tostring(collectAll ~= nil)
+    ))
+
     local lastFire = 0
 
     connection = RunService.Heartbeat:Connect(function()
@@ -54,21 +45,15 @@ function autoTakeChest.SetEnabled(enabled)
         end
         lastFire = now
 
-        local playerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
-        if not playerGui then
-            return
+        if claimOre then
+            pcall(function()
+                claimOre:FireServer()
+            end)
         end
-
-        local button = findButtonByText(playerGui, "take all")
-        if not button then
-            return
-        end
-
-        local ok, err = clickButton(button)
-        if ok then
-            log("[AutoTakeChest] clicked Take All")
-        else
-            log("[AutoTakeChest] " .. tostring(err))
+        if collectAll then
+            pcall(function()
+                collectAll:FireServer()
+            end)
         end
     end)
 end

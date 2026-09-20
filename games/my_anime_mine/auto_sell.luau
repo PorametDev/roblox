@@ -1,25 +1,17 @@
--- Sell flow observed via Interaction Logger: walk up to the SellStand NPC's
--- SellPrompt (ProximityPrompt, ActionText="Sell items") to open SellFrame,
--- then SelectAllButton picks everything. Whether SelectAllButton alone
--- completes the sale, or a separate confirm button exists that we haven't
--- seen fire yet, is still unconfirmed - watch MekPro.log/your currency to
--- check this is actually selling, not just selecting.
+-- Fires SellItems directly (found via Debug: Dump All Remotes) instead of
+-- clicking SelectAllButton. Still walks up to SellStand's ProximityPrompt
+-- first since that's a real world object, not a UI simulation - matches
+-- what a player actually does to open the sell flow. Argument signature
+-- for SellItems is unconfirmed (fired with no args here); check MekPro.log
+-- for errors and whether currency actually increases.
 return function(import)
 
-local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local log = import("core/logger")
 
 local FIRE_INTERVAL = 2
-
-local function clickButton(button)
-    if not firesignal then
-        return false, "firesignal is not available on this executor"
-    end
-    pcall(firesignal, button.Activated)
-    return true
-end
 
 local autoSell = {}
 local connection = nil
@@ -36,7 +28,10 @@ function autoSell.SetEnabled(enabled)
         return
     end
 
-    log("[AutoSell] enabled")
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    local sellItems = remotes and remotes:FindFirstChild("SellItems")
+    log("[AutoSell] enabled (SellItems=" .. tostring(sellItems ~= nil) .. ")")
+
     local lastFire = 0
 
     connection = RunService.Heartbeat:Connect(function()
@@ -52,17 +47,12 @@ function autoSell.SetEnabled(enabled)
             fireproximityprompt(prompt)
         end
 
-        local playerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
-        local mineGui = playerGui and playerGui:FindFirstChild("MineGui")
-        local content = mineGui and mineGui:FindFirstChild("SellFrame") and mineGui.SellFrame:FindFirstChild("Content")
-        local selectAllButton = content and content:FindFirstChild("SelectAllButton")
-
-        if selectAllButton then
-            local ok, err = clickButton(selectAllButton)
-            if ok then
-                log("[AutoSell] clicked SelectAllButton")
-            else
-                log("[AutoSell] " .. tostring(err))
+        if sellItems then
+            local ok, err = pcall(function()
+                sellItems:FireServer()
+            end)
+            if not ok then
+                log("[AutoSell] SellItems:FireServer() error: " .. tostring(err))
             end
         end
     end)
