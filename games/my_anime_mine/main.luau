@@ -15,6 +15,7 @@ return function(import)
     local autoMine = import("games/my_anime_mine/auto_mine")(import)
     local autoPlace = import("games/my_anime_mine/auto_place")(import)
     local autoTakeChest = import("games/my_anime_mine/auto_take_chest")(import)
+    local autoOpenChest = import("games/my_anime_mine/auto_open_chest")(import)
 
     local farmTab = window:AddTab("ฟาร์ม", "🏠")
 
@@ -30,6 +31,13 @@ return function(import)
         "หยิบ miner จาก Backpack ไปวางลง Holder ที่ว่างอัตโนมัติ"
     ):AddToggle(false, function(state)
         autoPlace.SetEnabled(state)
+    end)
+
+    farmTab:AddCard(
+        "Auto Open Chest",
+        "กด ChestPrompt ให้อัตโนมัติ เพื่อให้หน้า Take All โผล่ขึ้นมา"
+    ):AddToggle(false, function(state)
+        autoOpenChest.SetEnabled(state)
     end)
 
     local debugCard = farmTab:AddCard("Debug: Current Plot", "กดเพื่อเช็ค plot ปัจจุบัน (ผลขึ้นตรงบนปุ่มเอง ไม่ต้องพึ่ง console)")
@@ -138,6 +146,7 @@ return function(import)
         autoMine.SetEnabled(false)
         autoPlace.SetEnabled(false)
         autoTakeChest.SetEnabled(false)
+        autoOpenChest.SetEnabled(false)
         antiAfk.SetEnabled(false)
     end)
 end
