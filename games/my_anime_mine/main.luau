@@ -11,9 +11,16 @@ return function(import)
     local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
     local getPlotParts = import("games/my_anime_mine/get_plot_parts")
     local dumpInstance = import("games/my_anime_mine/debug_dump")
+    local autoMine = import("games/my_anime_mine/auto_mine")(import)
 
     local farmTab = window:AddTab("ฟาร์ม", "🏠")
-    -- Business logic for My Anime Mine goes here.
+
+    farmTab:AddCard(
+        "Auto Mine",
+        "กดหินอัตโนมัติทุก Node ใน plot ปัจจุบัน (ยิง ClickDetector 'NodeClick')"
+    ):AddToggle(false, function(state)
+        autoMine.SetEnabled(state)
+    end)
 
     local debugCard = farmTab:AddCard("Debug: Current Plot", "กดเพื่อเช็ค plot ปัจจุบัน (ผลขึ้นตรงบนปุ่มเอง ไม่ต้องพึ่ง console)")
     -- Forward-declared: the callback below closes over `checkBtn`, but a
