@@ -7,10 +7,13 @@
 -- sell closing the frame on its own never triggered the return, stranding
 -- the character at the SellStand).
 --
--- SellFrame also kept flashing on screen: the game tweens its Position in
--- every frame while opening, which overrides a Position we only set once
--- every 0.5s in Step(). A separate per-frame connection keeps re-hiding it
--- every single frame so our override always wins.
+-- SellFrame also kept flashing on screen. Moving the whole frame's Position
+-- off-screen was the wrong fix - its Backdrop (the full-screen dim behind
+-- the popup) blocked the player from clicking anything else in the game
+-- while "hidden" this way. Instead we hide only the visible pieces
+-- (Content, Backdrop, Close) via .Visible, leaving SellFrame itself
+-- untouched so the game's own open/close state and our own Visible check
+-- both keep working normally, and the player's other UI stays clickable.
 --
 -- Step() itself no longer owns a Heartbeat connection - core/turn_scheduler
 -- calls it only when it's this task's turn, so multiple autos never fire in
@@ -25,7 +28,7 @@ local log = import("core/logger")
 
 local FIRE_INTERVAL = 0.5
 local RECHECK_COOLDOWN = 5
-local HIDDEN_POSITION = UDim2.new(3, 0, 3, 0)
+local HIDDEN_PIECE_NAMES = { "Content", "Backdrop", "Close" }
 
 local function getSellFrame()
     local playerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
@@ -78,10 +81,12 @@ local lastVisibleState = nil
 local nextOpenCheck = 0
 local hideConnection = nil
 
-local function restoreFramePosition()
-    local sellFrame = getSellFrame()
-    if sellFrame then
-        sellFrame.Position = sellFrame:GetAttribute("MekProOriginalPosition") or sellFrame.Position
+local function setPiecesVisible(sellFrame, isVisible)
+    for _, name in ipairs(HIDDEN_PIECE_NAMES) do
+        local piece = sellFrame:FindFirstChild(name)
+        if piece then
+            piece.Visible = isVisible
+        end
     end
 end
 
@@ -96,7 +101,10 @@ function autoSell.SetEnabled(state)
             hideConnection:Disconnect()
             hideConnection = nil
         end
-        restoreFramePosition()
+        local sellFrame = getSellFrame()
+        if sellFrame then
+            setPiecesVisible(sellFrame, true)
+        end
         teleport.Return()
         log("[AutoSell] disabled")
     else
@@ -104,10 +112,7 @@ function autoSell.SetEnabled(state)
         hideConnection = RunService.Heartbeat:Connect(function()
             local sellFrame = getSellFrame()
             if sellFrame and sellFrame.Visible then
-                if sellFrame:GetAttribute("MekProOriginalPosition") == nil then
-                    sellFrame:SetAttribute("MekProOriginalPosition", sellFrame.Position)
-                end
-                sellFrame.Position = HIDDEN_POSITION
+                setPiecesVisible(sellFrame, false)
             end
         end)
         log("[AutoSell] enabled (only sells when there's something in the scroll)")
@@ -159,10 +164,18 @@ function autoSell.Step()
         local selectAllButton = content and content:FindFirstChild("SelectAllButton")
         local sellButton = content and content:FindFirstChild("SellButton")
 
+        -- Ore keeps flowing in passively (placed miners, chest collecting),
+        -- which can refresh the card list and reset the selection between
+        -- our 0.5s ticks - "Select All" never got a chance to be observed
+        -- as "Deselect All" before the next tick reset it. Click Select All
+        -- and re-check/click Sell in the SAME tick instead of waiting for
+        -- the next one, since the label updates synchronously.
         if selectAllButton and labelText(selectAllButton) == "Select All" then
             clickButton(selectAllButton)
             log("[AutoSell] clicked SelectAllButton (" .. cardCount .. " cards)")
-        elseif sellButton and labelText(sellButton):find("Sell for", 1, true) then
+        end
+
+        if sellButton and labelText(sellButton):find("Sell for", 1, true) then
             clickButton(sellButton)
             log("[AutoSell] clicked SellButton")
         end

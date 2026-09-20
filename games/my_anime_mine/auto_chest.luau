@@ -7,10 +7,13 @@
 -- (MouseButton1Click, Activated, MouseButton1Down/Up) since we don't know
 -- which one the game's script actually listens to.
 --
--- ChestFrame also kept flashing on screen: the game tweens its Position in
--- every frame while opening, which overrides a Position we only set once
--- every 0.5s in Step(). A separate per-frame connection keeps re-hiding it
--- every single frame so our override always wins.
+-- ChestFrame also kept flashing on screen. Moving the whole frame's Position
+-- off-screen was the wrong fix - its Backdrop (the full-screen dim behind
+-- the popup) blocked the player from clicking anything else in the game
+-- while "hidden" this way. Instead we hide only the visible pieces
+-- (Content, Backdrop, Close) via .Visible, leaving ChestFrame itself
+-- untouched so the game's own open/close state and our own Visible check
+-- both keep working normally, and the player's other UI stays clickable.
 --
 -- Only actually collects once the chest's own progress label
 -- ("141/3,600 Items") shows at least MIN_ITEMS_TO_COLLECT, so we're not
@@ -30,7 +33,7 @@ local log = import("core/logger")
 local FIRE_INTERVAL = 0.5
 local RECHECK_COOLDOWN = 5
 local MIN_ITEMS_TO_COLLECT = 100
-local HIDDEN_POSITION = UDim2.new(3, 0, 3, 0)
+local HIDDEN_PIECE_NAMES = { "Content", "Backdrop", "Close" }
 
 local function getChestFrame()
     local playerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
@@ -71,10 +74,12 @@ local lastVisibleState = nil
 local nextOpenCheck = 0
 local hideConnection = nil
 
-local function restoreFramePosition()
-    local chestFrame = getChestFrame()
-    if chestFrame then
-        chestFrame.Position = chestFrame:GetAttribute("MekProOriginalPosition") or chestFrame.Position
+local function setPiecesVisible(chestFrame, isVisible)
+    for _, name in ipairs(HIDDEN_PIECE_NAMES) do
+        local piece = chestFrame:FindFirstChild(name)
+        if piece then
+            piece.Visible = isVisible
+        end
     end
 end
 
@@ -89,17 +94,17 @@ function autoChest.SetEnabled(state)
             hideConnection:Disconnect()
             hideConnection = nil
         end
-        restoreFramePosition()
+        local chestFrame = getChestFrame()
+        if chestFrame then
+            setPiecesVisible(chestFrame, true)
+        end
         log("[AutoChest] disabled")
     else
         nextOpenCheck = 0
         hideConnection = RunService.Heartbeat:Connect(function()
             local chestFrame = getChestFrame()
             if chestFrame and chestFrame.Visible then
-                if chestFrame:GetAttribute("MekProOriginalPosition") == nil then
-                    chestFrame:SetAttribute("MekProOriginalPosition", chestFrame.Position)
-                end
-                chestFrame.Position = HIDDEN_POSITION
+                setPiecesVisible(chestFrame, false)
             end
         end)
         log("[AutoChest] enabled (collects once >= " .. MIN_ITEMS_TO_COLLECT .. " items)")
