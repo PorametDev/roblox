@@ -1,12 +1,19 @@
 -- The real flow, straight from the game's own hint: "Hold a miner first -
 -- tap it in your hotbar (or press 1-9), then press E here." Miners aren't
--- Roblox Tools (the Backpack is empty - that's why this kept reporting "no
--- miner to place"), so holding one means pressing its hotbar number key.
+-- Roblox Tools (the Backpack is empty), so holding one means pressing its
+-- hotbar number key.
 --
--- The holder's prompt confirms each state: ActionText reads "Hold a miner
--- to place" until one is held, then becomes "Place <miner name>". We wait
--- for that second state before pressing E, so we never fire into a prompt
--- the game hasn't accepted yet.
+-- Each holder's prompt spells out its state:
+--   Enabled = false            -> locked slot, unusable (H3 is one)
+--   "Empty miner slot" +
+--     "Hold a miner to place"  -> empty, nothing held yet
+--     "Place <name>"           -> empty, holding a miner, ready to press E
+--   "<name>" + "Pick up"       -> occupied by that miner
+--
+-- So filling the plot isn't just "put miners in empty slots": a holder
+-- sitting on a power-31 Namek Prince while power-195 Warped Ninjas wait in
+-- the hotbar should be swapped. Pick up the weak one, then place the strong
+-- one in the slot it freed.
 --
 -- Registered with core/scheduler as EXCLUSIVE: it teleports to the holder
 -- and presses the hotbar key, so it must not run while Auto Sell/Auto Chest
@@ -34,15 +41,22 @@ local function findHolderPrompt(holder)
     return pad and pad:FindFirstChildWhichIsA("ProximityPrompt", true)
 end
 
--- A locked holder still reads "Empty miner slot" but has its prompt
--- disabled - H3 is one, and without this check Auto Place hammered it
--- forever while the usable holders sat untouched.
-local function isHolderUsable(prompt)
-    return prompt ~= nil and prompt.Enabled and prompt.ObjectText == EMPTY_SLOT_TEXT
+local function isEmpty(prompt)
+    return prompt.ObjectText == EMPTY_SLOT_TEXT
 end
 
-local function isHolderEmpty(prompt)
-    return prompt ~= nil and prompt.ObjectText == EMPTY_SLOT_TEXT
+-- The billboard over a placed miner reads name / "Level 1" / rarity /
+-- power. Only the power is a bare number, so that's what to match.
+local function readPlacedPower(holder)
+    for _, descendant in ipairs(holder:GetDescendants()) do
+        if descendant:IsA("TextLabel") then
+            local digits = descendant.Text:match("^([%d,]+)$")
+            if digits then
+                return tonumber((digits:gsub(",", "")))
+            end
+        end
+    end
+    return nil
 end
 
 local function distanceTo(part)
@@ -54,21 +68,55 @@ local function distanceTo(part)
     return (hrp.Position - part.Position).Magnitude
 end
 
-local function findEmptyHolder()
+local function inRange(prompt)
+    local distance = distanceTo(prompt.Parent)
+    return distance == nil or distance <= prompt.MaxActivationDistance
+end
+
+local function firePrompt(prompt)
+    local ok, err = pcall(function()
+        fireproximityprompt(prompt, Enum.ProximityPromptInputType.Keyboard, prompt.HoldDuration)
+    end)
+    if not ok then
+        log("[AutoPlace] fireproximityprompt error: " .. tostring(err))
+    end
+    return ok
+end
+
+-- Surveys every holder once: which are free to fill, and which are holding
+-- something weak enough to be worth swapping out.
+local function surveyHolders()
     local plot = getCurrentPlot()
     local parts = plot and getPlotParts(plot)
     if not (parts and parts.Holders) then
         return nil
     end
 
+    local empty, occupied = {}, {}
+
     for _, holder in ipairs(parts.Holders:GetChildren()) do
         local prompt = findHolderPrompt(holder)
-        if isHolderUsable(prompt) then
-            return holder, prompt
+        -- A locked slot still reads "Empty miner slot" but has its prompt
+        -- disabled, and Auto Place used to hammer it forever.
+        if prompt and prompt.Enabled then
+            if isEmpty(prompt) then
+                table.insert(empty, { holder = holder, prompt = prompt })
+            else
+                table.insert(occupied, {
+                    holder = holder,
+                    prompt = prompt,
+                    name = prompt.ObjectText,
+                    power = readPlacedPower(holder) or 0,
+                })
+            end
         end
     end
 
-    return nil
+    table.sort(occupied, function(a, b)
+        return a.power < b.power
+    end)
+
+    return empty, occupied
 end
 
 local autoPlace = {}
@@ -98,7 +146,7 @@ function autoPlace.SetEnabled(state)
         log("[AutoPlace] disabled")
     else
         lastAttempt = 0
-        log("[AutoPlace] enabled (places the strongest miner it can find)")
+        log("[AutoPlace] enabled (fills empty holders, then upgrades weak ones)")
     end
 end
 
@@ -110,12 +158,24 @@ function autoPlace.IsBusy()
     return busy
 end
 
--- "Place <name>" is the game telling us it sees the held miner. Until then
--- pressing E does nothing.
-local function isPromptReady(prompt)
-    return prompt.ActionText ~= nil and prompt.ActionText:find("Place", 1, true) ~= nil
+-- Stand on the pad. Offsetting away put us outside the prompt's activation
+-- distance for every holder that wasn't already nearby.
+local function goTo(prompt)
+    teleport.To(prompt.Parent, Vector3.new(0, 3, 0))
+    task.wait(0.3)
+
+    if inRange(prompt) then
+        return true
+    end
+
+    local distance = distanceTo(prompt.Parent)
+    log(string.format("[AutoPlace] teleport didn't land: %.1f studs away (max %s)",
+        distance or -1, tostring(prompt.MaxActivationDistance)))
+    return false
 end
 
+-- "Place <name>" is the game confirming it sees the held miner. Pressing E
+-- before that does nothing.
 local function holdMiner(prompt, miner)
     local key = SLOT_KEYS[miner.slot]
     if not key then
@@ -126,7 +186,7 @@ local function holdMiner(prompt, miner)
 
     for _ = 1, 8 do
         task.wait(0.1)
-        if isPromptReady(prompt) then
+        if prompt.ActionText and prompt.ActionText:find("Place", 1, true) then
             return true
         end
     end
@@ -134,30 +194,13 @@ local function holdMiner(prompt, miner)
     return false
 end
 
-local function runJob(holder, prompt, candidates)
-    busy = true
-
-    -- Stand right on the pad. Offsetting 5 studs away worked for the two
-    -- holders that happened to be near where we already were and failed for
-    -- every other one - the prompt only reports "Place <name>" while we're
-    -- inside its activation distance.
-    teleport.To(prompt.Parent, Vector3.new(0, 3, 0))
-    task.wait(0.3)
-
-    -- Cycling all nine slots took ~5 seconds, long enough for the character
-    -- to end up 128 studs from the pad while we were still pressing keys.
-    -- Confirm we actually landed before spending any time here.
-    local arrived = distanceTo(prompt.Parent)
-    if arrived and arrived > prompt.MaxActivationDistance then
-        log(string.format("[AutoPlace] teleport didn't land: %.1f studs from %s (max %s), skipping",
-            arrived, holder.Name, tostring(prompt.MaxActivationDistance)))
-        teleport.Return()
-        busy = false
-        return
+local function placeBest(holder, prompt)
+    local candidates = getMinerSlots()
+    if #candidates == 0 then
+        log("[AutoPlace] nothing in the hotbar to place")
+        return false
     end
 
-    -- Walk down from the strongest, but give up as soon as we've drifted
-    -- out of range rather than pressing keys into nothing.
     local miner = nil
     for _, candidate in ipairs(candidates) do
         if holdMiner(prompt, candidate) then
@@ -165,49 +208,63 @@ local function runJob(holder, prompt, candidates)
             break
         end
 
-        local distance = distanceTo(prompt.Parent)
-        if distance and distance > prompt.MaxActivationDistance then
-            log(string.format("[AutoPlace] drifted %.1f studs from %s while selecting, aborting",
-                distance, holder.Name))
-            teleport.Return()
-            busy = false
-            return
+        if not inRange(prompt) then
+            log("[AutoPlace] drifted out of range of " .. holder.Name .. " while selecting")
+            return false
         end
 
         log("[AutoPlace] slot " .. candidate.slot .. " (" .. candidate.name
             .. ") didn't take, trying the next one")
     end
 
-    -- ActionText is only a hint that the game noticed us; the slot filling
-    -- is the real proof. Press E regardless and judge by the result, but
-    -- record why the hint never arrived so a repeat failure is diagnosable.
-    if not miner then
-        miner = candidates[1]
-        log(string.format(
-            "[AutoPlace] no slot reported ready (prompt '%s', enabled=%s, %s studs away) - trying %s anyway",
-            tostring(prompt.ActionText), tostring(prompt.Enabled),
-            distanceTo(prompt.Parent) and string.format("%.1f", distanceTo(prompt.Parent)) or "?",
-            miner.name
-        ))
-    end
-
-    local ok, err = pcall(function()
-        fireproximityprompt(prompt, Enum.ProximityPromptInputType.Keyboard, prompt.HoldDuration)
-    end)
-    if not ok then
-        log("[AutoPlace] fireproximityprompt error: " .. tostring(err))
-        teleport.Return()
-        busy = false
-        return
-    end
-
+    -- ActionText is only a hint; the slot filling is the real proof.
+    miner = miner or candidates[1]
+    firePrompt(prompt)
     task.wait(0.5)
 
-    if isHolderEmpty(prompt) then
-        log("[AutoPlace] " .. holder.Name .. " is still empty after placing " .. miner.name)
-    else
-        log("[AutoPlace] placed " .. miner.name .. " (power " .. miner.power
-            .. ") on " .. holder.Name)
+    if isEmpty(prompt) then
+        log("[AutoPlace] " .. holder.Name .. " still empty after placing " .. miner.name)
+        return false
+    end
+
+    log("[AutoPlace] placed " .. miner.name .. " (power " .. miner.power
+        .. ") on " .. holder.Name)
+    return true
+end
+
+local function pickUp(entry)
+    firePrompt(entry.prompt)
+    task.wait(0.5)
+
+    if not isEmpty(entry.prompt) then
+        log("[AutoPlace] couldn't pick up " .. entry.name .. " from " .. entry.holder.Name
+            .. " (prompt says '" .. tostring(entry.prompt.ActionText) .. "')")
+        return false
+    end
+
+    log("[AutoPlace] picked up " .. entry.name .. " (power " .. entry.power
+        .. ") from " .. entry.holder.Name)
+    return true
+end
+
+local function runFillJob(target)
+    busy = true
+
+    if goTo(target.prompt) then
+        placeBest(target.holder, target.prompt)
+    end
+
+    teleport.Return()
+    busy = false
+end
+
+local function runUpgradeJob(target)
+    busy = true
+
+    if goTo(target.prompt) and pickUp(target) then
+        -- The picked-up miner lands back in the hotbar, so re-read it
+        -- before choosing what goes in - placeBest does that itself.
+        placeBest(target.holder, target.prompt)
     end
 
     teleport.Return()
@@ -225,11 +282,11 @@ function autoPlace.Step()
     end
     lastAttempt = now
 
-    -- Everything below is a read: nothing moves the character until there's
-    -- both an empty holder and a miner to put in it.
-    local holder, prompt = findEmptyHolder()
-    if not holder then
-        reason("no empty holder right now")
+    -- Everything here is a read: nothing moves the character until there's
+    -- actually something worth doing.
+    local empty, occupied = surveyHolders()
+    if not empty then
+        reason("not standing in any plot")
         return
     end
 
@@ -239,10 +296,31 @@ function autoPlace.Step()
         return
     end
 
-    lastReason = nil
-    task.spawn(function()
-        runJob(holder, prompt, candidates)
-    end)
+    if #empty > 0 then
+        lastReason = nil
+        task.spawn(function()
+            runFillJob(empty[1])
+        end)
+        return
+    end
+
+    -- Every slot is taken, so the only gain left is swapping out the
+    -- weakest one - and only when it's strictly weaker, otherwise an equal
+    -- pair would swap back and forth forever.
+    local weakest = occupied[1]
+    local best = candidates[1]
+
+    if weakest and best.power > weakest.power then
+        lastReason = nil
+        log("[AutoPlace] upgrading " .. weakest.holder.Name .. ": " .. weakest.name
+            .. " (" .. weakest.power .. ") -> " .. best.name .. " (" .. best.power .. ")")
+        task.spawn(function()
+            runUpgradeJob(weakest)
+        end)
+        return
+    end
+
+    reason("every holder already has something at least as strong as the hotbar's best")
 end
 
 return autoPlace
