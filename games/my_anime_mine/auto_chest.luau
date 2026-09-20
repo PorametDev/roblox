@@ -53,15 +53,15 @@ local function getItemCount(chestFrame)
     return tonumber(digits)
 end
 
+-- Firing multiple signals at once double-toggled Auto Sell's SelectAllButton
+-- (it never advanced past "Select All"). Activated alone is the one
+-- Interaction Logger confirms actually reaches the game's handler, and
+-- TakeButton/Close here are one-shot actions so this is just as reliable
+-- for them.
 local function clickButton(button)
-    for _, signalName in ipairs({ "MouseButton1Click", "Activated", "MouseButton1Down", "MouseButton1Up" }) do
-        local signal = button[signalName]
-        if signal then
-            pcall(function()
-                firesignal(signal)
-            end)
-        end
-    end
+    pcall(function()
+        firesignal(button.Activated)
+    end)
 end
 
 local autoChest = {}

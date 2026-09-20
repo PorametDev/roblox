@@ -54,15 +54,15 @@ local function countCards(sellFrame)
     return count
 end
 
+-- Firing MouseButton1Click AND Activated together double-toggled
+-- SelectAllButton (a toggle, not a one-shot action) back to its starting
+-- state within the same "click" - it never advanced past "Select All".
+-- Activated alone is the one Interaction Logger confirms actually reaches
+-- the game's handler.
 local function clickButton(button)
-    for _, signalName in ipairs({ "MouseButton1Click", "Activated", "MouseButton1Down", "MouseButton1Up" }) do
-        local signal = button[signalName]
-        if signal then
-            pcall(function()
-                firesignal(signal)
-            end)
-        end
-    end
+    pcall(function()
+        firesignal(button.Activated)
+    end)
 end
 
 local function getSellStandPromptPart()
