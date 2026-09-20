@@ -12,6 +12,12 @@
 --   Buy research    SendEvent("MineBuySkill", nodeId, family)
 --   Upgrade a unit  SendEvent("MineUpgradeCharacter", key, stat)
 --   Buy a pickaxe   SendEvent("MineBuyPickaxe", tierIndex)
+--   Give one out    SendEvent("MineEquipPickaxe", holderKey, pickaxeName)
+--   Roll a mutation SendEvent("MineRollMutation", holderKey)
+--
+-- The unit screen's fourth tab, Enchants, has no event of its own in any
+-- of the decompiled clients - only panel-visibility code - so there's
+-- nothing to automate there yet.
 --
 -- The same dump also explained a long-standing mystery: the game binds its
 -- buttons to MouseButton1Down, not Activated, which is why
@@ -190,6 +196,25 @@ end
 
 function api.BuyPickaxe(tierIndex)
     return send("MineBuyPickaxe", tierIndex)
+end
+
+function api.EquipPickaxe(holderKey, pickaxeName)
+    return send("MineEquipPickaxe", holderKey, pickaxeName)
+end
+
+function api.RollMutation(holderKey)
+    return send("MineRollMutation", holderKey)
+end
+
+-- Highest cost among the ones we own: cost tracks quality here too.
+function api.BestOwnedPickaxe()
+    local best = nil
+    for _, pickaxe in ipairs(api.GetPickaxes()) do
+        if pickaxe.owned and (not best or pickaxe.cost > best.cost) then
+            best = pickaxe
+        end
+    end
+    return best
 end
 
 function api.BuySkill(nodeId, family)

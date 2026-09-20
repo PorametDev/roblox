@@ -188,6 +188,17 @@ return function(import)
         autoUpgrade.SetPickaxeTarget(savedPick)
     end
 
+    persistentToggle(
+        farmTab:AddCard("Auto Upgrade: แจก Pickaxe ให้ miner",
+            "ให้ miner ทุกตัวถือ pickaxe ที่ดีที่สุดที่เรามี"),
+        "autoUpgradeEquipPickaxe", autoUpgrade.SetEquipPickaxes
+    )
+    persistentToggle(
+        farmTab:AddCard("Auto Upgrade: สุ่ม Mutation",
+            "ปิดไว้เป็นค่าเริ่มต้น - ไม่รู้ว่าการสุ่มหนึ่งครั้งเสียอะไรบ้าง"),
+        "autoUpgradeRollMutation", autoUpgrade.SetRollMutations
+    )
+
     persistentToggle(farmTab:AddCard(
         "Auto Research (Plot)",
         "ซื้อ research ทุก family ในโซนที่ปลดแล้วผ่าน remote ตรง (ไม่เปิด UI)"

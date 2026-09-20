@@ -40,6 +40,14 @@ local buyPickaxe = true
 -- 0 means "work it out": buy the most expensive one we don't own yet and
 -- can actually afford, which is the best available upgrade.
 local pickaxeTarget = 0
+local equipPickaxes = true
+-- Off by default: rolling costs something, and nothing in the state says
+-- what, so this shouldn't start spending on its own.
+local rollMutations = false
+
+-- Holder entries don't record which pickaxe they're carrying, so remember
+-- what we handed out rather than re-sending the same one every pass.
+local equippedByHolder = {}
 
 local autoUpgrade = {}
 local enabled = false
@@ -81,6 +89,17 @@ end
 
 function autoUpgrade.SetPickaxeTarget(index)
     pickaxeTarget = index
+end
+
+function autoUpgrade.SetEquipPickaxes(state)
+    equipPickaxes = state
+    if not state then
+        table.clear(equippedByHolder)
+    end
+end
+
+function autoUpgrade.SetRollMutations(state)
+    rollMutations = state
 end
 
 local function holders()
@@ -159,6 +178,23 @@ local function tryPickaxe()
     return false
 end
 
+-- Hands the best pickaxe we own to every placed miner.
+local function equipBestPickaxe()
+    local best = gameApi.BestOwnedPickaxe()
+    if not best then
+        return
+    end
+
+    for holderKey in pairs(holders()) do
+        if equippedByHolder[holderKey] ~= best.name then
+            gameApi.EquipPickaxe(holderKey, best.name)
+            equippedByHolder[holderKey] = best.name
+            log("[AutoUpgrade] gave " .. best.name .. " to " .. holderKey)
+            task.wait(0.3)
+        end
+    end
+end
+
 local function runJob()
     busy = true
     local bought = 0
@@ -184,6 +220,22 @@ local function runJob()
 
     if buyPickaxe and enabled and bought < maxPerPass and tryPickaxe() then
         bought = bought + 1
+    end
+
+    if equipPickaxes and enabled then
+        equipBestPickaxe()
+    end
+
+    if rollMutations and enabled then
+        for holderKey in pairs(holders()) do
+            if bought >= maxPerPass then
+                break
+            end
+            gameApi.RollMutation(holderKey)
+            log("[AutoUpgrade] rolled a mutation on " .. holderKey)
+            bought = bought + 1
+            task.wait(0.4)
+        end
     end
 
     if bought == 0 then
