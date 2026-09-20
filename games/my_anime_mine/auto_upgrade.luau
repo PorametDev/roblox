@@ -45,10 +45,6 @@ local equipPickaxes = true
 -- what, so this shouldn't start spending on its own.
 local rollMutations = false
 
--- Holder entries don't record which pickaxe they're carrying, so remember
--- what we handed out rather than re-sending the same one every pass.
-local equippedByHolder = {}
-
 local autoUpgrade = {}
 local enabled = false
 local busy = false
@@ -93,9 +89,6 @@ end
 
 function autoUpgrade.SetEquipPickaxes(state)
     equipPickaxes = state
-    if not state then
-        table.clear(equippedByHolder)
-    end
 end
 
 function autoUpgrade.SetRollMutations(state)
@@ -178,18 +171,46 @@ local function tryPickaxe()
     return false
 end
 
--- Hands the best pickaxe we own to every placed miner.
-local function equipBestPickaxe()
-    local best = gameApi.BestOwnedPickaxe()
-    if not best then
+-- Holder entries carry the pickaxe's name in .Pickaxe, so what's equipped
+-- is readable rather than something we have to remember.
+--
+-- Handed out best-first with no repeats: the unit screen counts how many
+-- other holders wear the same pickaxe (wornBy), so the game clearly cares
+-- about sharing one. Spreading them is right either way - if sharing is
+-- allowed, each miner still ends up with the best one left.
+local function equipPickaxesBestFirst()
+    local owned = {}
+    for _, pickaxe in ipairs(gameApi.GetPickaxes()) do
+        if pickaxe.owned then
+            table.insert(owned, pickaxe)
+        end
+    end
+
+    if #owned == 0 then
         return
     end
 
+    table.sort(owned, function(a, b)
+        return a.cost > b.cost
+    end)
+
+    local holderKeys = {}
     for holderKey in pairs(holders()) do
-        if equippedByHolder[holderKey] ~= best.name then
-            gameApi.EquipPickaxe(holderKey, best.name)
-            equippedByHolder[holderKey] = best.name
-            log("[AutoUpgrade] gave " .. best.name .. " to " .. holderKey)
+        table.insert(holderKeys, holderKey)
+    end
+    table.sort(holderKeys)
+
+    for position, holderKey in ipairs(holderKeys) do
+        local wanted = owned[position]
+        if not wanted then
+            break
+        end
+
+        local entry = holders()[holderKey]
+        if entry and entry.Pickaxe ~= wanted.name then
+            gameApi.EquipPickaxe(holderKey, wanted.name)
+            log("[AutoUpgrade] " .. holderKey .. " pickaxe "
+                .. tostring(entry.Pickaxe or "none") .. " -> " .. wanted.name)
             task.wait(0.3)
         end
     end
@@ -223,7 +244,7 @@ local function runJob()
     end
 
     if equipPickaxes and enabled then
-        equipBestPickaxe()
+        equipPickaxesBestFirst()
     end
 
     if rollMutations and enabled then
