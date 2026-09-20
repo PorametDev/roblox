@@ -22,6 +22,16 @@ function click.Signal(button)
     end)
 end
 
+-- Presses a key for real, same pipeline as Real(). Needed for games that
+-- bind their own hotbar to the number keys rather than using Roblox Tools.
+function click.Key(keyCode)
+    return pcall(function()
+        VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
+        task.wait(0.05)
+        VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+    end)
+end
+
 -- Clicks the button for real, via the engine's input pipeline.
 function click.Real(button)
     local position = button.AbsolutePosition

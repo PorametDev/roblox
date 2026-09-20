@@ -1,99 +1,77 @@
--- Auto Place used to grab whatever Tool came first out of the Backpack,
--- which meant placing a power-6 Namek Hero while a power-195 Warped Ninja
--- sat unused. This ranks every miner the player holds and returns the
--- strongest.
+-- Miners are NOT Roblox Tools - the Backpack is empty and the game runs its
+-- own inventory, which is why Auto Place kept reporting "no miner in the
+-- Backpack". They live in the game's own hotbar UI, one slot frame per
+-- number key:
 --
--- The power number is the one the hotbar card shows in red. We don't know
--- which attribute the game stores it in, so try the likely attribute names
--- and Value children first, then fall back to reading the hotbar card's own
--- "Damage" label (confirmed to exist at
--- HotbarFrame > ... > ItemFrame > Content > Damage). Every tool's resolved
--- power is logged once so the real attribute name shows up in MekPro.log.
+--   MineGui > HotbarFrame > Content > Container > "1".."9"
+--       > ItemFrame > Content > ItemName ("Namek Hero") / Damage ("6")
+--
+-- The red number on each card is its power, so this reads every filled slot
+-- and returns the strongest one's slot number - pressing that number key is
+-- how you "hold" it, exactly as the game's own hint says.
+--
+-- Only covers what's on the hotbar; anything still in the bag would need
+-- the inventory screen opened first.
 return function(import)
 
 local Players = game:GetService("Players")
 local log = import("core/logger")
 
-local ATTRIBUTE_NAMES = { "Damage", "Power", "MineDamage", "MinePower", "DPS", "Strength" }
+local reported = {}
 
-local reportedTools = {}
-
-local function fromAttributes(tool)
-    for _, name in ipairs(ATTRIBUTE_NAMES) do
-        local value = tool:GetAttribute(name)
-        if type(value) == "number" then
-            return value, "attr:" .. name
-        end
-    end
-
-    for _, name in ipairs(ATTRIBUTE_NAMES) do
-        local child = tool:FindFirstChild(name)
-        if child and child:IsA("ValueBase") and type(child.Value) == "number" then
-            return child.Value, "value:" .. name
-        end
-    end
-
-    return nil
-end
-
--- The hotbar card for a held miner shows its power, so match by name.
-local function fromHotbar(toolName)
+local function getContainer()
     local playerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
     local mineGui = playerGui and playerGui:FindFirstChild("MineGui")
     local hotbar = mineGui and mineGui:FindFirstChild("HotbarFrame")
-    if not hotbar then
+    local content = hotbar and hotbar:FindFirstChild("Content")
+    return content and content:FindFirstChild("Container")
+end
+
+local function readSlot(slotFrame)
+    local itemFrame = slotFrame:FindFirstChild("ItemFrame")
+    local content = itemFrame and itemFrame:FindFirstChild("Content")
+    local nameLabel = content and content:FindFirstChild("ItemName")
+    local damageLabel = content and content:FindFirstChild("Damage")
+
+    if not (nameLabel and damageLabel) then
         return nil
     end
 
-    for _, descendant in ipairs(hotbar:GetDescendants()) do
-        if descendant.Name == "ItemName" and descendant:IsA("TextLabel") and descendant.Text == toolName then
-            local damage = descendant.Parent and descendant.Parent:FindFirstChild("Damage")
-            if damage and damage:IsA("TextLabel") then
-                local number = tonumber((damage.Text:gsub("[^%d%.]", "")))
-                if number then
-                    return number, "hotbar"
+    local name = nameLabel.Text
+    if name == "" then
+        return nil
+    end
+
+    local power = tonumber((damageLabel.Text:gsub("[^%d%.]", "")))
+    return name, power or 0
+end
+
+local function getBestMiner()
+    local container = getContainer()
+    if not container then
+        return nil
+    end
+
+    local best = nil
+
+    for _, slotFrame in ipairs(container:GetChildren()) do
+        local slot = tonumber(slotFrame.Name)
+        if slot and slot >= 1 and slot <= 9 then
+            local name, power = readSlot(slotFrame)
+            if name then
+                if not reported[name] then
+                    reported[name] = true
+                    log("[BestMiner] slot " .. slot .. ": " .. name .. " power " .. power)
+                end
+
+                if not best or power > best.power then
+                    best = { slot = slot, name = name, power = power }
                 end
             end
         end
     end
 
-    return nil
-end
-
-local function getPower(tool)
-    local power, source = fromAttributes(tool)
-    if not power then
-        power, source = fromHotbar(tool.Name)
-    end
-
-    if not reportedTools[tool.Name] then
-        reportedTools[tool.Name] = true
-        log("[BestMiner] " .. tool.Name .. " power = " .. tostring(power)
-            .. " (" .. tostring(source) .. ")")
-    end
-
-    return power or 0
-end
-
-local function getBestMiner()
-    local player = Players.LocalPlayer
-    local backpack = player:FindFirstChild("Backpack")
-    if not backpack then
-        return nil
-    end
-
-    local best, bestPower = nil, -1
-
-    for _, tool in ipairs(backpack:GetChildren()) do
-        if tool:IsA("Tool") then
-            local power = getPower(tool)
-            if power > bestPower then
-                best, bestPower = tool, power
-            end
-        end
-    end
-
-    return best, bestPower
+    return best
 end
 
 return getBestMiner

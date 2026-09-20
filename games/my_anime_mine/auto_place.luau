@@ -1,24 +1,32 @@
--- The real flow, confirmed from in-game screenshots: hold a miner, stand at
--- an empty holder, press E. The holder's prompt spells out which state
--- you're in - ActionText reads "Hold a miner to place" until a miner is
--- equipped, then becomes "Place <miner name>". We wait for that second
--- state before firing, so we never press E into a prompt the game hasn't
--- accepted yet.
+-- The real flow, straight from the game's own hint: "Hold a miner first -
+-- tap it in your hotbar (or press 1-9), then press E here." Miners aren't
+-- Roblox Tools (the Backpack is empty - that's why this kept reporting "no
+-- miner to place"), so holding one means pressing its hotbar number key.
+--
+-- The holder's prompt confirms each state: ActionText reads "Hold a miner
+-- to place" until one is held, then becomes "Place <miner name>". We wait
+-- for that second state before pressing E, so we never fire into a prompt
+-- the game hasn't accepted yet.
 --
 -- Registered with core/scheduler as EXCLUSIVE: it teleports to the holder
--- and equips a tool, so it must not run while Auto Sell/Auto Chest have the
--- character somewhere else.
+-- and presses the hotbar key, so it must not run while Auto Sell/Auto Chest
+-- have the character somewhere else.
 return function(import)
 
-local Players = game:GetService("Players")
 local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
 local getPlotParts = import("games/my_anime_mine/get_plot_parts")
 local getBestMiner = import("games/my_anime_mine/get_best_miner")(import)
 local teleport = import("core/teleport")
+local click = import("core/click")
 local log = import("core/logger")
 
 local CHECK_INTERVAL = 3
 local EMPTY_SLOT_TEXT = "Empty miner slot"
+local SLOT_KEYS = {
+    Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three,
+    Enum.KeyCode.Four, Enum.KeyCode.Five, Enum.KeyCode.Six,
+    Enum.KeyCode.Seven, Enum.KeyCode.Eight, Enum.KeyCode.Nine,
+}
 
 local function findHolderPrompt(holder)
     local pad = holder:FindFirstChild("Pad")
@@ -85,20 +93,21 @@ function autoPlace.IsBusy()
     return busy
 end
 
-local function runJob(holder, prompt, tool, power)
+local function runJob(holder, prompt, miner)
     busy = true
 
     teleport.To(prompt.Parent)
+    task.wait(0.2)
 
-    local character = Players.LocalPlayer.Character
-    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-    if not humanoid then
+    local key = SLOT_KEYS[miner.slot]
+    if not key then
+        log("[AutoPlace] slot " .. tostring(miner.slot) .. " has no key binding")
         teleport.Return()
         busy = false
         return
     end
 
-    humanoid:EquipTool(tool)
+    click.Key(key)
 
     -- "Place <name>" is the game telling us it sees the held miner. Until
     -- then pressing E does nothing.
@@ -113,7 +122,7 @@ local function runJob(holder, prompt, tool, power)
 
     if not ready then
         log("[AutoPlace] prompt still says '" .. tostring(prompt.ActionText)
-            .. "' after equipping " .. tool.Name .. ", skipping")
+            .. "' after selecting slot " .. miner.slot .. " (" .. miner.name .. "), skipping")
         teleport.Return()
         busy = false
         return
@@ -132,9 +141,9 @@ local function runJob(holder, prompt, tool, power)
     task.wait(0.5)
 
     if isHolderEmpty(prompt) then
-        log("[AutoPlace] " .. holder.Name .. " is still empty after placing " .. tool.Name)
+        log("[AutoPlace] " .. holder.Name .. " is still empty after placing " .. miner.name)
     else
-        log("[AutoPlace] placed " .. tool.Name .. " (power " .. tostring(power)
+        log("[AutoPlace] placed " .. miner.name .. " (power " .. miner.power
             .. ") on " .. holder.Name)
     end
 
@@ -161,15 +170,15 @@ function autoPlace.Step()
         return
     end
 
-    local tool, power = getBestMiner()
-    if not tool then
-        reason("no miner in the Backpack to place")
+    local miner = getBestMiner()
+    if not miner then
+        reason("hotbar has no miner to place")
         return
     end
 
     lastReason = nil
     task.spawn(function()
-        runJob(holder, prompt, tool, power)
+        runJob(holder, prompt, miner)
     end)
 end
 
