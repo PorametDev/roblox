@@ -415,6 +415,9 @@ local function createWindow(config)
     header.Size = UDim2.new(1, -24, 0, 48)
     header.Position = UDim2.new(0, 12, 0, 64)
     header.BackgroundTransparency = 1
+    -- Frames default Active to false, which silently drops InputBegan/
+    -- InputChanged - without this, dragging the window never fires at all.
+    header.Active = true
     header.Parent = main
 
     local avatar = Instance.new("TextLabel")
