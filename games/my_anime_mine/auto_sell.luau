@@ -1,21 +1,26 @@
 -- SellButton was clicking successfully (per interaction log) but the sale
 -- still failed - the server checks the player's REAL position before
 -- allowing a sell, and fireproximityprompt bypasses distance but doesn't
--- move the character. So we now teleport the HumanoidRootPart next to the
--- SellStand before opening it, and teleport back to where we started once
--- the sale completes. We also move SellFrame off-screen while it's open
--- (instead of touching .Visible, which the game's own scripts key off of)
--- so the popup doesn't flash on screen during automation. Only actually
--- opens/sells once there's at least one Card in the sell scroll, so we're
--- not teleporting back and forth with nothing to sell - per user request.
--- No longer owns its own Heartbeat connection - core/turn_scheduler calls
--- Step() only when it's this task's turn, so multiple autos never fire in
--- the same frame and fight over the character (e.g. teleporting to the
--- SellStand while Auto Mine/Auto Chest are still acting on the plot).
+-- move the character. Teleport next to the SellStand via core/teleport
+-- before opening, and always teleport back once the frame closes again
+-- (previously only happened on the "nothing to sell" path - a successful
+-- sell closing the frame on its own never triggered the return, stranding
+-- the character at the SellStand).
+--
+-- SellFrame also kept flashing on screen: the game tweens its Position in
+-- every frame while opening, which overrides a Position we only set once
+-- every 0.5s in Step(). A separate per-frame connection keeps re-hiding it
+-- every single frame so our override always wins.
+--
+-- Step() itself no longer owns a Heartbeat connection - core/turn_scheduler
+-- calls it only when it's this task's turn, so multiple autos never fire in
+-- the same frame and fight over the character.
 return function(import)
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local teleport = import("core/teleport")(import)
 local log = import("core/logger")
 
 local FIRE_INTERVAL = 0.5
@@ -66,30 +71,18 @@ local function getSellStandPromptPart()
     return prompt, prompt and prompt.Parent
 end
 
-local function teleportTo(part)
-    local character = Players.LocalPlayer.Character
-    local hrp = character and character:FindFirstChild("HumanoidRootPart")
-    if not (hrp and part) then
-        return false
-    end
-    hrp.CFrame = CFrame.new(part.Position + Vector3.new(0, 3, 5))
-    return true
-end
-
 local autoSell = {}
 local enabled = false
 local lastFire = 0
 local lastVisibleState = nil
 local nextOpenCheck = 0
-local returnCFrame = nil
+local hideConnection = nil
 
-local function returnHome()
-    local character = Players.LocalPlayer.Character
-    local hrp = character and character:FindFirstChild("HumanoidRootPart")
-    if hrp and returnCFrame then
-        hrp.CFrame = returnCFrame
+local function restoreFramePosition()
+    local sellFrame = getSellFrame()
+    if sellFrame then
+        sellFrame.Position = sellFrame:GetAttribute("MekProOriginalPosition") or sellFrame.Position
     end
-    returnCFrame = nil
 end
 
 function autoSell.SetEnabled(state)
@@ -99,14 +92,24 @@ function autoSell.SetEnabled(state)
     enabled = state
 
     if not enabled then
-        local sellFrame = getSellFrame()
-        if sellFrame then
-            sellFrame.Position = sellFrame:GetAttribute("MekProOriginalPosition") or sellFrame.Position
+        if hideConnection then
+            hideConnection:Disconnect()
+            hideConnection = nil
         end
-        returnHome()
+        restoreFramePosition()
+        teleport.Return()
         log("[AutoSell] disabled")
     else
         nextOpenCheck = 0
+        hideConnection = RunService.Heartbeat:Connect(function()
+            local sellFrame = getSellFrame()
+            if sellFrame and sellFrame.Visible then
+                if sellFrame:GetAttribute("MekProOriginalPosition") == nil then
+                    sellFrame:SetAttribute("MekProOriginalPosition", sellFrame.Position)
+                end
+                sellFrame.Position = HIDDEN_POSITION
+            end
+        end)
         log("[AutoSell] enabled (only sells when there's something in the scroll)")
     end
 end
@@ -133,14 +136,14 @@ function autoSell.Step()
         log("[AutoSell] SellFrame.Visible = " .. tostring(visible))
         lastVisibleState = visible
 
-        if visible and sellFrame:GetAttribute("MekProOriginalPosition") == nil then
-            sellFrame:SetAttribute("MekProOriginalPosition", sellFrame.Position)
+        if not visible then
+            -- Covers every way the frame can close: selling successfully,
+            -- closing an empty cart, or the player closing it themselves.
+            teleport.Return()
         end
     end
 
     if visible then
-        sellFrame.Position = HIDDEN_POSITION
-
         local cardCount = countCards(sellFrame)
         if cardCount == 0 then
             log("[AutoSell] nothing to sell, closing")
@@ -148,7 +151,6 @@ function autoSell.Step()
             if closeButton then
                 clickButton(closeButton)
             end
-            returnHome()
             nextOpenCheck = now + RECHECK_COOLDOWN
             return
         end
@@ -167,15 +169,7 @@ function autoSell.Step()
     elseif now >= nextOpenCheck then
         local prompt, promptPart = getSellStandPromptPart()
         if prompt and promptPart then
-            if not returnCFrame then
-                local character = Players.LocalPlayer.Character
-                local hrp = character and character:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    returnCFrame = hrp.CFrame
-                end
-            end
-
-            teleportTo(promptPart)
+            teleport.To(promptPart)
 
             local ok, err = pcall(function()
                 fireproximityprompt(prompt, Enum.ProximityPromptInputType.Keyboard, prompt.HoldDuration)

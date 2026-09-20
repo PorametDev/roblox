@@ -5,18 +5,24 @@
 -- happened. Fix: only fire the prompt when the frame is currently closed;
 -- click TakeButton on every tick it's open using multiple signals
 -- (MouseButton1Click, Activated, MouseButton1Down/Up) since we don't know
--- which one the game's script actually listens to. Also move ChestFrame
--- off-screen while it's open (instead of touching .Visible, which the
--- game's own scripts key off of) so the popup doesn't flash during
--- automation. Only actually collects once the chest's own progress label
+-- which one the game's script actually listens to.
+--
+-- ChestFrame also kept flashing on screen: the game tweens its Position in
+-- every frame while opening, which overrides a Position we only set once
+-- every 0.5s in Step(). A separate per-frame connection keeps re-hiding it
+-- every single frame so our override always wins.
+--
+-- Only actually collects once the chest's own progress label
 -- ("141/3,600 Items") shows at least MIN_ITEMS_TO_COLLECT, so we're not
 -- taking a nearly-empty chest every second - per user request.
--- No longer owns its own Heartbeat connection - core/turn_scheduler calls
--- Step() only when it's this task's turn, so multiple autos never fire in
+--
+-- Step() itself no longer owns a Heartbeat connection - core/turn_scheduler
+-- calls it only when it's this task's turn, so multiple autos never fire in
 -- the same frame and fight over the character.
 return function(import)
 
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
 local getPlotParts = import("games/my_anime_mine/get_plot_parts")
 local log = import("core/logger")
@@ -63,6 +69,14 @@ local enabled = false
 local lastFire = 0
 local lastVisibleState = nil
 local nextOpenCheck = 0
+local hideConnection = nil
+
+local function restoreFramePosition()
+    local chestFrame = getChestFrame()
+    if chestFrame then
+        chestFrame.Position = chestFrame:GetAttribute("MekProOriginalPosition") or chestFrame.Position
+    end
+end
 
 function autoChest.SetEnabled(state)
     if state == enabled then
@@ -71,13 +85,23 @@ function autoChest.SetEnabled(state)
     enabled = state
 
     if not enabled then
-        local chestFrame = getChestFrame()
-        if chestFrame then
-            chestFrame.Position = chestFrame:GetAttribute("MekProOriginalPosition") or chestFrame.Position
+        if hideConnection then
+            hideConnection:Disconnect()
+            hideConnection = nil
         end
+        restoreFramePosition()
         log("[AutoChest] disabled")
     else
         nextOpenCheck = 0
+        hideConnection = RunService.Heartbeat:Connect(function()
+            local chestFrame = getChestFrame()
+            if chestFrame and chestFrame.Visible then
+                if chestFrame:GetAttribute("MekProOriginalPosition") == nil then
+                    chestFrame:SetAttribute("MekProOriginalPosition", chestFrame.Position)
+                end
+                chestFrame.Position = HIDDEN_POSITION
+            end
+        end)
         log("[AutoChest] enabled (collects once >= " .. MIN_ITEMS_TO_COLLECT .. " items)")
     end
 end
@@ -103,15 +127,9 @@ function autoChest.Step()
     if visible ~= lastVisibleState then
         log("[AutoChest] ChestFrame.Visible = " .. tostring(visible))
         lastVisibleState = visible
-
-        if visible and chestFrame:GetAttribute("MekProOriginalPosition") == nil then
-            chestFrame:SetAttribute("MekProOriginalPosition", chestFrame.Position)
-        end
     end
 
     if visible then
-        chestFrame.Position = HIDDEN_POSITION
-
         local count = getItemCount(chestFrame)
         if count and count < MIN_ITEMS_TO_COLLECT then
             log("[AutoChest] only " .. count .. " items, waiting for " .. MIN_ITEMS_TO_COLLECT)
