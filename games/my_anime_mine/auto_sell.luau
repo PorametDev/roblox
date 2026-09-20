@@ -21,6 +21,7 @@ return function(import)
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local teleport = import("core/teleport")(import)
+local click = import("core/click")(import)
 local log = import("core/logger")
 
 local CHECK_INTERVAL = 3
@@ -52,10 +53,15 @@ local function countCards(sellFrame)
     return count
 end
 
+-- Real mouse click, not firesignal: the log proved firesignal(Activated)
+-- never reached the game's own handler for these buttons (labels never
+-- changed), even though our Interaction Logger saw the signal fire.
 local function clickButton(button)
-    pcall(function()
-        firesignal(button.Activated)
-    end)
+    local ok, err = click.Real(button)
+    if not ok then
+        log("[AutoSell] click failed on " .. button.Name .. ": " .. tostring(err))
+    end
+    return ok
 end
 
 local function getSellStandPromptPart()
@@ -111,7 +117,10 @@ local function runJob()
         return
     end
 
-    task.wait(0.3)
+    -- Long enough for the open animation to finish - a real mouse click
+    -- needs the button sitting at its final on-screen position, not
+    -- mid-tween.
+    task.wait(0.8)
 
     if not enabled then
         teleport.Return()
