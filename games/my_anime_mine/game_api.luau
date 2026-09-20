@@ -293,6 +293,43 @@ function api.MinerSlots()
     return (ok and count) or 0
 end
 
+-- Miners actually standing on a holder, Haulers excluded - the same count
+-- MineHUDClient uses to decide how many pickaxes can be in use at once,
+-- since a Hauler doesn't swing one.
+function api.PlacedMinerCount()
+    if not modules() then
+        return 0
+    end
+
+    local mine = api.GetMineData()
+    if not mine then
+        return 0
+    end
+
+    local count = 0
+    pcall(function()
+        for _, holder in pairs(mine.Holders or {}) do
+            if type(holder) == "table" and holder.CharName then
+                local itemData = items.GetItemData(holder.CharName)
+                if itemData and itemData.MineRole ~= "Hauler" then
+                    count = count + 1
+                end
+            end
+        end
+    end)
+    return count
+end
+
+-- Total pickaxes owned across every type, counting duplicates. The free
+-- starter is excluded because it isn't something we bought.
+function api.OwnedPickaxeCount()
+    local total = 0
+    for _, pickaxe in ipairs(api.GetPickaxes()) do
+        total = total + pickaxe.ownedCount
+    end
+    return total
+end
+
 function api.MaxMinerSlots()
     if not modules() then
         return 0

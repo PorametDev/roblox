@@ -206,6 +206,12 @@ return function(import)
     end
 
     persistentToggle(
+        farmTab:AddCard("Auto Upgrade: ไม่ซื้อเกินจำนวน holder",
+            "pickaxe มีค่าเฉพาะตอนมีคนถือ - ซื้อเกินจำนวนช่องที่ปลดแล้วก็เปลืองเปล่า"),
+        "autoUpgradeLimitPickaxes", autoUpgrade.SetLimitPickaxesToHolders, true
+    )
+
+    persistentToggle(
         farmTab:AddCard("Auto Upgrade: แจก Pickaxe ให้ miner",
             "แจกตัวที่ multiplier สูงสุดก่อน ถือซ้ำได้ถ้ามีหลายอัน"),
         "autoUpgradeEquipPickaxe", autoUpgrade.SetEquipPickaxes, true

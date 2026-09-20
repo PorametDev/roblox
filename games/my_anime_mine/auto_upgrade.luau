@@ -44,6 +44,8 @@ local buyPickaxe = true
 -- 0 means "work it out": follow the game's own wanted-pickaxe rule.
 local pickaxeTarget = 0
 local equipPickaxes = true
+-- Don't own more pickaxes than there are holders to hold them.
+local limitToHolders = true
 -- Now that GetMutationRollCost is known this can be switched on safely, but
 -- it still spends money on a gamble, so it stays off until asked for.
 local rollMutations = false
@@ -54,6 +56,8 @@ local autoUpgrade = {}
 local enabled = false
 local busy = false
 local lastAttempt = 0
+-- Says "we're at the cap" once rather than every pass forever.
+local reportedCap = false
 
 function autoUpgrade.SetEnabled(state)
     if state == enabled then
@@ -98,6 +102,10 @@ end
 
 function autoUpgrade.SetEquipPickaxes(state)
     equipPickaxes = state
+end
+
+function autoUpgrade.SetLimitPickaxesToHolders(state)
+    limitToHolders = state
 end
 
 function autoUpgrade.SetRollMutations(state)
@@ -207,7 +215,37 @@ local function upgradeStats()
     return bought, tooExpensive, maxed
 end
 
+-- A pickaxe is only worth anything while someone is holding it, so there's
+-- no point owning more of them than there are holders to put them in.
+--
+-- Worth being clear about what this costs, because the game's own rule
+-- would keep buying past this point: once you own one per holder,
+-- WantedPickaxe only ever picks something that BEATS the weakest one
+-- currently in use, so each further purchase is a real upgrade to the
+-- lineup - it just costs a full price to raise one miner by one step. The
+-- cap trades those marginal upgrades for not bleeding money, which is the
+-- right trade while research and unit levels are the bottleneck.
+--
+-- "Holders you can place into" is the unlocked slot count rather than the
+-- number currently filled, so buying ahead of Auto Place is still allowed.
+local function pickaxeCapReached()
+    if not limitToHolders then
+        return false
+    end
+
+    local cap = gameApi.MinerSlots()
+    if cap <= 0 then
+        return false
+    end
+
+    return gameApi.OwnedPickaxeCount() >= cap
+end
+
 local function findPickaxe()
+    if pickaxeCapReached() then
+        return nil
+    end
+
     if pickaxeTarget > 0 then
         for _, pickaxe in ipairs(gameApi.GetPickaxes()) do
             if pickaxe.index == pickaxeTarget then
@@ -417,8 +455,18 @@ local function runJob()
 
     local bought, tooExpensive, maxed = upgradeStats()
 
-    if buyPickaxe and enabled and bought < maxPerPass and tryPickaxe() then
-        bought = bought + 1
+    if buyPickaxe and enabled and bought < maxPerPass then
+        if pickaxeCapReached() then
+            if not reportedCap then
+                log("[AutoUpgrade] " .. gameApi.OwnedPickaxeCount()
+                    .. " pickaxe(s) for " .. gameApi.MinerSlots()
+                    .. " holder(s) - not buying more")
+                reportedCap = true
+            end
+        elseif tryPickaxe() then
+            bought = bought + 1
+            reportedCap = false
+        end
     end
 
     if equipPickaxes and enabled then
