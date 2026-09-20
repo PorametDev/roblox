@@ -1,11 +1,14 @@
-local getPlaceId = loadstring(readfile("core/get_place_id.luau"))()
-local registry = loadstring(readfile("games/registry.luau"))()
+-- Local dev entry point: resolves modules from disk via readfile.
+-- The published build (dist/out.lua, from scripts/build.py) resolves the
+-- same "core/xxx" paths from an in-memory table instead — every other
+-- source file is written against `import` and never calls readfile itself.
+local cache = {}
 
-local scriptPath = registry[getPlaceId()]
-
-if not scriptPath then
-    print("This is not a supported place.")
-    return
+local function import(path)
+    if cache[path] == nil then
+        cache[path] = loadstring(readfile(path .. ".luau"))()
+    end
+    return cache[path]
 end
 
-loadstring(readfile(scriptPath))()
+import("core/dispatch")(import)
