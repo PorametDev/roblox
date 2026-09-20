@@ -15,7 +15,12 @@ return function(import)
     -- Business logic for My Anime Mine goes here.
 
     local debugCard = farmTab:AddCard("Debug: Current Plot", "กดเพื่อเช็ค plot ปัจจุบัน (ผลขึ้นตรงบนปุ่มเอง ไม่ต้องพึ่ง console)")
-    local checkBtn = debugCard:AddButton("Check", function()
+    -- Forward-declared: the callback below closes over `checkBtn`, but a
+    -- `local checkBtn = AddButton(..., function() checkBtn... end)` in one
+    -- statement would have the closure see the OUTER (nil) checkBtn - the
+    -- new local's scope doesn't start until after the whole statement ends.
+    local checkBtn
+    checkBtn = debugCard:AddButton("Check", function()
         local plot = getCurrentPlot()
         if not plot then
             checkBtn.Text = "not found"
