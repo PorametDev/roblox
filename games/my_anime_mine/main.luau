@@ -13,6 +13,7 @@ return function(import)
     local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
     local getPlotParts = import("games/my_anime_mine/get_plot_parts")
     local dumpInstance = import("games/my_anime_mine/debug_dump")
+    local dumpRemotes = import("games/my_anime_mine/debug_dump_remotes")(import)
     local autoMine = import("games/my_anime_mine/auto_mine")(import)
     local autoPlace = import("games/my_anime_mine/auto_place")(import)
     local autoTakeChest = import("games/my_anime_mine/auto_take_chest")(import)
@@ -142,6 +143,16 @@ return function(import)
         dumpInstance(tool, log)
 
         toolDumpBtn.Text = "Done"
+    end)
+
+    local remoteDumpCard = farmTab:AddCard(
+        "Debug: Dump All Remotes",
+        "กดเพื่อบันทึกรายชื่อ RemoteEvent/RemoteFunction ทั้งหมดใน ReplicatedStorage ลง MekPro.log"
+    )
+    local remoteDumpBtn
+    remoteDumpBtn = remoteDumpCard:AddButton("Dump", function()
+        local count = dumpRemotes()
+        remoteDumpBtn.Text = count .. " remotes"
     end)
 
     local settingsTab = window:AddTab("ตั้งค่า", "⚙")
