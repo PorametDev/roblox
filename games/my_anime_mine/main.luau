@@ -7,17 +7,25 @@ return function(import)
         Subtitle = "My Anime Mine · Mining Hub",
     })
 
-    local farmTab = window:AddTab("ฟาร์ม", "🏠")
-    farmTab:AddSectionHeader("สุ่มเด็ก")
-    farmTab:AddCard("แพ็คในล่าสุด"):SetValue("—")
+    local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
+    local getPlotParts = import("games/my_anime_mine/get_plot_parts")
 
-    farmTab:AddSectionHeader("งานประจำ")
-    local autoClaimCard = farmTab:AddCard(
-        "กดรับรางวัลให้อัตโนมัติ",
-        "กดรับทั้งภารกิจและรางวัลตามเวลาเล่นทันทีที่ปลดล็อก"
-    )
-    autoClaimCard:AddToggle(false, function(state)
-        print("Auto claim:", state)
+    local farmTab = window:AddTab("ฟาร์ม", "🏠")
+    -- Business logic for My Anime Mine goes here.
+
+    farmTab:AddCard("Debug: Current Plot", "กดเพื่อพิมพ์ plot ปัจจุบันลง console"):AddButton("Check", function()
+        local plot = getCurrentPlot()
+        if not plot then
+            print("[MyAnimeMine] not standing in any plot")
+            return
+        end
+
+        local parts = getPlotParts(plot)
+        print(
+            "[MyAnimeMine] current plot:", plot.Name,
+            "| Nodes:", parts.Nodes and #parts.Nodes:GetChildren() or 0,
+            "| Holders:", parts.Holders and #parts.Holders:GetChildren() or 0
+        )
     end)
 
     local settingsTab = window:AddTab("ตั้งค่า", "⚙")

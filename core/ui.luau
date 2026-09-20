@@ -171,7 +171,6 @@ function UI:AddTab(name, icon, opts)
 
     tabButton.MouseButton1Click:Connect(function()
         setActive(name)
-        self.ActiveTabName = name
     end)
 
     local tab = {}
@@ -266,6 +265,24 @@ function UI:AddTab(name, icon, opts)
             badge.Text = text
             badge.BackgroundColor3 = color or THEME.Badge
             return badge
+        end
+
+        function cardApi:AddButton(text, callback)
+            local btn = Instance.new("TextButton")
+            btn.Size = UDim2.new(0, 70, 0, 28)
+            btn.Position = UDim2.new(1, -70, 0, -4)
+            btn.BackgroundColor3 = THEME.Accent
+            btn.AutoButtonColor = false
+            btn.Text = text
+            btn.Font = THEME.Font
+            btn.TextSize = 13
+            btn.TextColor3 = THEME.Background
+            btn.Parent = card
+            corner(btn, RADIUS.Small)
+
+            btn.MouseButton1Click:Connect(callback)
+
+            return btn
         end
 
         function cardApi:AddToggle(default, callback)
@@ -402,9 +419,6 @@ function UI:AddTab(name, icon, opts)
     end
 
     self.Tabs[name] = tab
-    if not self.ActiveTabName then
-        self.ActiveTabName = name
-    end
     return tab
 end
 
@@ -613,7 +627,6 @@ local function createWindow(config)
     self.Connections = connections
     self.UIScale = uiScale
     self.SearchIndex = {}
-    self.ActiveTabName = nil
 
     table.insert(connections, minimizeBtn.MouseButton1Click:Connect(function()
         setMinimized(not minimized)
@@ -632,28 +645,19 @@ local function createWindow(config)
         self:Destroy()
     end))
 
-    -- Filters cards by title/subtitle across every tab, not just the one
-    -- currently open - otherwise the box can't find anything outside the
-    -- active tab, which defeats the point of a search box.
+    -- Filters cards by title/subtitle within whichever tab is open. Only
+    -- touches card visibility, never tab.Page.Visible - so it never pulls
+    -- in results from other tabs or switches the open tab on its own.
     table.insert(connections, searchBox:GetPropertyChangedSignal("Text"):Connect(function()
         local query = searchBox.Text:lower()
 
-        if query == "" then
-            for tabName, tab in pairs(self.Tabs) do
-                tab.Page.Visible = tabName == self.ActiveTabName
-            end
-            for _, item in ipairs(self.SearchIndex) do
-                item.Frame.Visible = true
-            end
-            return
-        end
-
-        for _, tab in pairs(self.Tabs) do
-            tab.Page.Visible = true
-        end
         for _, item in ipairs(self.SearchIndex) do
-            local haystack = (item.Title .. " " .. (item.Subtitle or "")):lower()
-            item.Frame.Visible = haystack:find(query, 1, true) ~= nil
+            if query == "" then
+                item.Frame.Visible = true
+            else
+                local haystack = (item.Title .. " " .. (item.Subtitle or "")):lower()
+                item.Frame.Visible = haystack:find(query, 1, true) ~= nil
+            end
         end
     end))
 
