@@ -146,12 +146,27 @@ local function runJob()
     if selectAllButton and labelText(selectAllButton) == "Select All" then
         clickButton(selectAllButton)
         log("[AutoSell] clicked SelectAllButton (" .. cardCount .. " cards)")
-        task.wait(0.3)
     end
 
-    if sellButton and labelText(sellButton):find("Sell for", 1, true) then
+    -- The Sell label may animate a price count-up before it reads
+    -- "Sell for $X" - poll for up to ~1.5s instead of checking once, and
+    -- log what we actually see either way so a real stuck state is
+    -- distinguishable from "just needed a bit more time".
+    local sawLabel = nil
+    for _ = 1, 5 do
+        task.wait(0.3)
+        sawLabel = sellButton and labelText(sellButton) or nil
+        if sawLabel and sawLabel:find("Sell for", 1, true) then
+            break
+        end
+    end
+
+    if sawLabel and sawLabel:find("Sell for", 1, true) then
         clickButton(sellButton)
         log("[AutoSell] clicked SellButton")
+    else
+        log("[AutoSell] SellButton never showed a price, label = '" .. tostring(sawLabel)
+            .. "', SelectAllButton label = '" .. (selectAllButton and labelText(selectAllButton) or "nil") .. "'")
     end
 
     task.wait(0.5)
