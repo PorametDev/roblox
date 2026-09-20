@@ -1,18 +1,24 @@
--- Registered with core/scheduler as EXCLUSIVE: equipping a tool and firing
--- a holder's prompt both act on the character, and the server checks real
--- position for placement, so this must not run while Auto Sell/Auto Chest
--- have the character teleported elsewhere.
+-- The real flow, confirmed from in-game screenshots: hold a miner, stand at
+-- an empty holder, press E. The holder's prompt spells out which state
+-- you're in - ActionText reads "Hold a miner to place" until a miner is
+-- equipped, then becomes "Place <miner name>". We wait for that second
+-- state before firing, so we never press E into a prompt the game hasn't
+-- accepted yet.
+--
+-- Registered with core/scheduler as EXCLUSIVE: it teleports to the holder
+-- and equips a tool, so it must not run while Auto Sell/Auto Chest have the
+-- character somewhere else.
 return function(import)
 
 local Players = game:GetService("Players")
 local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
 local getPlotParts = import("games/my_anime_mine/get_plot_parts")
+local getBestMiner = import("games/my_anime_mine/get_best_miner")(import)
+local teleport = import("core/teleport")
 local log = import("core/logger")
 
--- HolderPrompt's HoldDuration is 0 (fires instantly), but placing is still
--- paced on an interval so an equipped tool has time to actually leave the
--- Backpack before the next holder is checked.
-local FIRE_INTERVAL = 1
+local CHECK_INTERVAL = 3
+local EMPTY_SLOT_TEXT = "Empty miner slot"
 
 local function findHolderPrompt(holder)
     local pad = holder:FindFirstChild("Pad")
@@ -20,12 +26,30 @@ local function findHolderPrompt(holder)
 end
 
 local function isHolderEmpty(prompt)
-    return prompt ~= nil and prompt.ObjectText == "Empty miner slot"
+    return prompt ~= nil and prompt.ObjectText == EMPTY_SLOT_TEXT
+end
+
+local function findEmptyHolder()
+    local plot = getCurrentPlot()
+    local parts = plot and getPlotParts(plot)
+    if not (parts and parts.Holders) then
+        return nil
+    end
+
+    for _, holder in ipairs(parts.Holders:GetChildren()) do
+        local prompt = findHolderPrompt(holder)
+        if isHolderEmpty(prompt) then
+            return holder, prompt
+        end
+    end
+
+    return nil
 end
 
 local autoPlace = {}
 local enabled = false
-local lastFire = 0
+local busy = false
+local lastAttempt = 0
 local lastReason = nil
 
 local function reason(text)
@@ -41,78 +65,112 @@ function autoPlace.SetEnabled(state)
     end
     enabled = state
     lastReason = nil
-    log("[AutoPlace] " .. (enabled and "enabled" or "disabled"))
+
+    if not enabled then
+        if not busy then
+            teleport.Return()
+        end
+        log("[AutoPlace] disabled")
+    else
+        lastAttempt = 0
+        log("[AutoPlace] enabled (places the strongest miner it can find)")
+    end
 end
 
 function autoPlace.IsEnabled()
     return enabled
 end
 
-function autoPlace.Step()
-    if not enabled then
-        return
-    end
+function autoPlace.IsBusy()
+    return busy
+end
 
-    local now = tick()
-    if now - lastFire < FIRE_INTERVAL then
-        return
-    end
-    lastFire = now
+local function runJob(holder, prompt, tool, power)
+    busy = true
 
-    local player = Players.LocalPlayer
-    local character = player.Character
-    local backpack = player:FindFirstChild("Backpack")
-    if not character or not backpack then
-        reason("no character/backpack")
-        return
-    end
+    teleport.To(prompt.Parent)
 
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    local tool = backpack:FindFirstChildWhichIsA("Tool")
+    local character = Players.LocalPlayer.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
     if not humanoid then
-        reason("no humanoid")
-        return
-    end
-    if not tool then
-        reason("no tool in Backpack (all miners already placed?)")
+        teleport.Return()
+        busy = false
         return
     end
 
-    local plot = getCurrentPlot()
-    if not plot then
-        reason("not standing in any plot")
-        return
-    end
+    humanoid:EquipTool(tool)
 
-    local parts = getPlotParts(plot)
-    if not parts.Holders then
-        reason("plot has no Holders folder")
-        return
-    end
-
-    local placed = false
-    for _, holder in ipairs(parts.Holders:GetChildren()) do
-        local prompt = findHolderPrompt(holder)
-        if isHolderEmpty(prompt) then
-            humanoid:EquipTool(tool)
-            local ok, err = pcall(function()
-                fireproximityprompt(prompt, Enum.ProximityPromptInputType.Keyboard, prompt.HoldDuration)
-            end)
-            if ok then
-                log("[AutoPlace] placed " .. tool.Name .. " on " .. holder.Name)
-            else
-                log("[AutoPlace] fireproximityprompt error: " .. tostring(err))
-            end
-            placed = true
+    -- "Place <name>" is the game telling us it sees the held miner. Until
+    -- then pressing E does nothing.
+    local ready = false
+    for _ = 1, 10 do
+        task.wait(0.1)
+        if prompt.ActionText and prompt.ActionText:find("Place", 1, true) then
+            ready = true
             break
         end
     end
 
-    if not placed then
-        reason("no empty holder found (" .. #parts.Holders:GetChildren() .. " holders checked)")
-    else
-        lastReason = nil
+    if not ready then
+        log("[AutoPlace] prompt still says '" .. tostring(prompt.ActionText)
+            .. "' after equipping " .. tool.Name .. ", skipping")
+        teleport.Return()
+        busy = false
+        return
     end
+
+    local ok, err = pcall(function()
+        fireproximityprompt(prompt, Enum.ProximityPromptInputType.Keyboard, prompt.HoldDuration)
+    end)
+    if not ok then
+        log("[AutoPlace] fireproximityprompt error: " .. tostring(err))
+        teleport.Return()
+        busy = false
+        return
+    end
+
+    task.wait(0.5)
+
+    if isHolderEmpty(prompt) then
+        log("[AutoPlace] " .. holder.Name .. " is still empty after placing " .. tool.Name)
+    else
+        log("[AutoPlace] placed " .. tool.Name .. " (power " .. tostring(power)
+            .. ") on " .. holder.Name)
+    end
+
+    teleport.Return()
+    busy = false
+end
+
+function autoPlace.Step()
+    if not enabled or busy then
+        return
+    end
+
+    local now = tick()
+    if now - lastAttempt < CHECK_INTERVAL then
+        return
+    end
+    lastAttempt = now
+
+    -- Everything below is a read: nothing moves the character until there's
+    -- both an empty holder and a miner to put in it.
+    local holder, prompt = findEmptyHolder()
+    if not holder then
+        reason("no empty holder right now")
+        return
+    end
+
+    local tool, power = getBestMiner()
+    if not tool then
+        reason("no miner in the Backpack to place")
+        return
+    end
+
+    lastReason = nil
+    task.spawn(function()
+        runJob(holder, prompt, tool, power)
+    end)
 end
 
 return autoPlace

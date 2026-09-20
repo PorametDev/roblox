@@ -49,7 +49,7 @@ return function(import)
     -- Exclusive: each needs the character standing somewhere specific (the
     -- server checks real position) or a menu open on screen, so they take
     -- turns and never overlap.
-    scheduler.RegisterExclusive("AutoPlace", autoPlace.Step, autoPlace.IsEnabled)
+    scheduler.RegisterExclusive("AutoPlace", autoPlace.Step, autoPlace.IsEnabled, autoPlace.IsBusy)
     scheduler.RegisterExclusive("AutoChest", autoChest.Step, autoChest.IsEnabled, autoChest.IsBusy)
     scheduler.RegisterExclusive("AutoSell", autoSell.Step, autoSell.IsEnabled, autoSell.IsBusy)
 
@@ -64,7 +64,7 @@ return function(import)
 
     persistentToggle(farmTab:AddCard(
         "Auto Place Miner",
-        "หยิบ miner จาก Backpack ไปวางลง Holder ที่ว่างอัตโนมัติ"
+        "เลือก miner ที่พลังสูงสุดจาก Backpack ไปวางลง Holder ที่ว่างอัตโนมัติ"
     ), "autoPlace", autoPlace.SetEnabled)
 
     persistentToggle(farmTab:AddCard(
