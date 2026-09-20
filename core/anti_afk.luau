@@ -11,11 +11,14 @@ function antiAfk.SetEnabled(enabled)
 
     if enabled then
         local player = Players.LocalPlayer
+        print("[AntiAFK] enabled - watching Player.Idled")
         connection = player.Idled:Connect(function()
+            print("[AntiAFK] idle detected, simulating input at", os.date("%X"))
             VirtualUser:CaptureController()
             VirtualUser:ClickButton2(Vector2.new())
         end)
     else
+        print("[AntiAFK] disabled")
         connection:Disconnect()
         connection = nil
     end
