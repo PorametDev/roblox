@@ -46,6 +46,7 @@ return function(import)
     local dumpSellCards = import("games/my_anime_mine/debug_dump_sell_cards")(import)
     local dumpGui = import("games/my_anime_mine/debug_dump_gui")(import)
     local dumpChest = import("games/my_anime_mine/debug_dump_chest")(import)
+    local inspectHandlers = import("games/my_anime_mine/debug_inspect_handlers")(import)
     local autoMine = import("games/my_anime_mine/auto_mine")(import)
     local autoPlace = import("games/my_anime_mine/auto_place")(import)
     local autoChest = import("games/my_anime_mine/auto_chest")(import)
@@ -268,6 +269,16 @@ return function(import)
     chestDumpBtn = chestDumpCard:AddButton("Dump", function()
         local count = dumpChest()
         chestDumpBtn.Text = count .. " parts"
+    end)
+
+    local handlersCard = debugTab:AddCard(
+        "Debug: Inspect Button Handlers",
+        "อ่านว่าปุ่มพวกนี้ยิง remote ไหนด้วย arg อะไร (เปิดเมนูที่จะตรวจค้างไว้ก่อนกด)"
+    )
+    local handlersBtn
+    handlersBtn = handlersCard:AddButton("Inspect", function()
+        inspectHandlers()
+        handlersBtn.Text = "Done"
     end)
 
     local settingsTab = window:AddTab("ตั้งค่า", "⚙")
