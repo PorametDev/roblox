@@ -13,6 +13,7 @@
 -- have the character somewhere else.
 return function(import)
 
+local Players = game:GetService("Players")
 local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
 local getPlotParts = import("games/my_anime_mine/get_plot_parts")
 local getMinerSlots = import("games/my_anime_mine/get_best_miner")(import)
@@ -120,8 +121,12 @@ end
 local function runJob(holder, prompt, candidates)
     busy = true
 
-    teleport.To(prompt.Parent)
-    task.wait(0.2)
+    -- Stand right on the pad. Offsetting 5 studs away worked for the two
+    -- holders that happened to be near where we already were and failed for
+    -- every other one - the prompt only reports "Place <name>" while we're
+    -- inside its activation distance.
+    teleport.To(prompt.Parent, Vector3.new(0, 3, 0))
+    task.wait(0.3)
 
     -- Walk down from the strongest: an emptied stack still shows a card the
     -- game won't let us hold, which had Auto Place pressing a dead key over
@@ -136,12 +141,21 @@ local function runJob(holder, prompt, candidates)
             .. ") didn't take, trying the next one")
     end
 
+    -- ActionText is only a hint that the game noticed us; the slot filling
+    -- is the real proof. Press E regardless and judge by the result, but
+    -- record why the hint never arrived so a repeat failure is diagnosable.
     if not miner then
-        log("[AutoPlace] no hotbar slot would hold, prompt says '"
-            .. tostring(prompt.ActionText) .. "'")
-        teleport.Return()
-        busy = false
-        return
+        miner = candidates[1]
+        local character = Players.LocalPlayer.Character
+        local hrp = character and character:FindFirstChild("HumanoidRootPart")
+        local distance = hrp and (hrp.Position - prompt.Parent.Position).Magnitude
+        log(string.format(
+            "[AutoPlace] no slot reported ready (prompt '%s', enabled=%s, maxDistance=%s, we're %s studs away) - trying %s anyway",
+            tostring(prompt.ActionText), tostring(prompt.Enabled),
+            tostring(prompt.MaxActivationDistance),
+            distance and string.format("%.1f", distance) or "?",
+            miner.name
+        ))
     end
 
     local ok, err = pcall(function()
