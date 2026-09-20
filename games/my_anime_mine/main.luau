@@ -5,11 +5,27 @@ return function(import)
     local antiAfk = import("core/anti_afk")(import)
     local interactionLogger = import("core/interaction_logger")(import)
     local scheduler = import("core/turn_scheduler")(import)
+    local config = import("core/config")(import)
     local log = import("core/logger")
 
     local window = createWindow({
         Subtitle = "My Anime Mine · Mining Hub",
     })
+
+    -- Every toggle below reads its starting state from the saved config and
+    -- writes back on change, so a reload comes up exactly as it was left.
+    -- AddToggle only renders the default, it doesn't fire the callback, so
+    -- a saved-on toggle has to be applied to its module explicitly.
+    local function persistentToggle(card, key, apply)
+        local saved = config.Get(key, false)
+        card:AddToggle(saved, function(state)
+            config.Set(key, state)
+            apply(state)
+        end)
+        if saved then
+            apply(true)
+        end
+    end
 
     local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
     local getPlotParts = import("games/my_anime_mine/get_plot_parts")
@@ -38,40 +54,30 @@ return function(import)
 
     local farmTab = window:AddTab("ฟาร์ม", "🏠")
 
-    farmTab:AddCard(
+    persistentToggle(farmTab:AddCard(
         "Auto Mine",
         "กดหินอัตโนมัติทุก Node ใน plot ปัจจุบัน (ยิง ClickDetector 'NodeClick')"
-    ):AddToggle(false, function(state)
-        autoMine.SetEnabled(state)
-    end)
+    ), "autoMine", autoMine.SetEnabled)
 
-    farmTab:AddCard(
+    persistentToggle(farmTab:AddCard(
         "Auto Place Miner",
         "หยิบ miner จาก Backpack ไปวางลง Holder ที่ว่างอัตโนมัติ"
-    ):AddToggle(false, function(state)
-        autoPlace.SetEnabled(state)
-    end)
+    ), "autoPlace", autoPlace.SetEnabled)
 
-    farmTab:AddCard(
+    persistentToggle(farmTab:AddCard(
         "Auto Chest",
-        "เปิด chest แล้วกดปุ่ม Take All อัตโนมัติ"
-    ):AddToggle(false, function(state)
-        autoChest.SetEnabled(state)
-    end)
+        "เช็คจำนวนของจากป้ายบน chest เงียบๆ ถึงเกณฑ์แล้วค่อยไปเก็บ (ไม่รบกวนตอนยังไม่ถึง)"
+    ), "autoChest", autoChest.SetEnabled)
 
-    farmTab:AddCard(
+    persistentToggle(farmTab:AddCard(
         "Auto Sell",
-        "เดินไปกด SellStand แล้วกด Select All + Sell อัตโนมัติ (ยืนยันจาก log ว่าขายได้จริง)"
-    ):AddToggle(false, function(state)
-        autoSell.SetEnabled(state)
-    end)
+        "ไปที่ SellStand แล้วกด Select All + Sell อัตโนมัติทุก 45 วินาที"
+    ), "autoSell", autoSell.SetEnabled)
 
-    farmTab:AddCard(
+    persistentToggle(farmTab:AddCard(
         "Auto Upgrade",
         "กด UpgradeClick ทุก Holder อัตโนมัติเมื่อมีเงินพอ"
-    ):AddToggle(false, function(state)
-        autoUpgrade.SetEnabled(state)
-    end)
+    ), "autoUpgrade", autoUpgrade.SetEnabled)
 
     local debugCard = farmTab:AddCard("Debug: Current Plot", "กดเพื่อเช็ค plot ปัจจุบัน (ผลขึ้นตรงบนปุ่มเอง ไม่ต้องพึ่ง console)")
     -- Forward-declared: the callback below closes over `checkBtn`, but a
@@ -201,22 +207,38 @@ return function(import)
     end)
 
     local settingsTab = window:AddTab("ตั้งค่า", "⚙")
-    settingsTab:AddCard("Anti-AFK", "ป้องกันถูกเตะออกจากห้องเวลาไม่ได้ขยับตัว"):AddToggle(false, function(state)
-        antiAfk.SetEnabled(state)
-    end)
-    settingsTab:AddCard(
-        "Interaction Logger (debug)",
-        "เปิดแล้วไปกด/แตะอะไรก็ได้ในเกม ทุก prompt/click/ปุ่มจะถูกบันทึกลง MekPro.log"
-    ):AddToggle(false, function(state)
-        interactionLogger.SetEnabled(state)
-    end)
-    settingsTab:AddSlider("ขนาดเมนู", "ย่อขยายเมนูทั้งชุด", 50, 150, 100, function(value)
+
+    persistentToggle(
+        settingsTab:AddCard("Anti-AFK", "ป้องกันถูกเตะออกจากห้องเวลาไม่ได้ขยับตัว"),
+        "antiAfk",
+        antiAfk.SetEnabled
+    )
+
+    persistentToggle(
+        settingsTab:AddCard(
+            "Interaction Logger (debug)",
+            "เปิดแล้วไปกด/แตะอะไรก็ได้ในเกม ทุก prompt/click/ปุ่มจะถูกบันทึกลง MekPro.log"
+        ),
+        "interactionLogger",
+        interactionLogger.SetEnabled
+    )
+
+    local savedScale = config.Get("menuScale", 100)
+    settingsTab:AddSlider("ขนาดเมนู", "ย่อขยายเมนูทั้งชุด", 50, 150, savedScale, function(value)
+        config.Set("menuScale", value)
         window:SetScale(value)
     end)
-    settingsTab:AddSegmented({ "ตามเครื่อง", "อังกฤษ", "ไทย" }, 1, function(index, value)
+    window:SetScale(savedScale)
+
+    local savedLanguage = config.Get("languageIndex", 1)
+    settingsTab:AddSegmented({ "ตามเครื่อง", "อังกฤษ", "ไทย" }, savedLanguage, function(index, value)
         local code = ({ "auto", "en", "th" })[index]
+        config.Set("languageIndex", index)
         i18n.SetLanguage(code)
     end)
+    i18n.SetLanguage(({ "auto", "en", "th" })[savedLanguage] or "auto")
+
+    log("[MekPro] settings file: " .. config.Path())
 
     -- Without this, closing the UI (or the loader auto-cleaning up a
     -- previous run) leaves these background loops running forever,
