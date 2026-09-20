@@ -1,9 +1,10 @@
--- ClaimOre/CollectAll fired with no args did nothing. The GUI dump captured
--- while a chest was open showed the real action is a plain button click:
--- ChestFrame.Content.Actions.TakeButton. We don't know what remote/args that
--- button's own script fires internally (no namecall spying allowed - see
--- interaction logger notes), so instead of guessing we click that exact
--- confirmed button, same approach that worked for Auto Sell.
+-- The interaction logger showed prompt.Triggered firing locally every tick,
+-- but the ChestFrame never actually opened in-game (the native "E" prompt
+-- bubble stayed up) - fireproximityprompt() alone isn't replicating a real
+-- trigger to the server for this game. Passing holdDuration/inputType is a
+-- known fix for some executors. We also now check Visible before clicking
+-- TakeButton and log every state, so we can tell "prompt didn't open the
+-- frame" apart from "frame opened but click did nothing".
 return function(import)
 
 local Players = game:GetService("Players")
@@ -14,10 +15,13 @@ local log = import("core/logger")
 
 local FIRE_INTERVAL = 1
 
-local function getTakeButton()
+local function getChestFrame()
     local playerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
     local mineGui = playerGui and playerGui:FindFirstChild("MineGui")
-    local chestFrame = mineGui and mineGui:FindFirstChild("ChestFrame")
+    return mineGui and mineGui:FindFirstChild("ChestFrame")
+end
+
+local function getTakeButton(chestFrame)
     local content = chestFrame and chestFrame:FindFirstChild("Content")
     local actions = content and content:FindFirstChild("Actions")
     return actions and actions:FindFirstChild("TakeButton")
@@ -47,6 +51,7 @@ function autoChest.SetEnabled(enabled)
 
     log("[AutoChest] enabled")
     local lastFire = 0
+    local lastVisibleState = nil
 
     connection = RunService.Heartbeat:Connect(function()
         local now = tick()
@@ -59,16 +64,31 @@ function autoChest.SetEnabled(enabled)
         local parts = plot and getPlotParts(plot)
         local prompt = parts and parts.Chest and parts.Chest:FindFirstChildWhichIsA("ProximityPrompt", true)
         if prompt then
-            fireproximityprompt(prompt)
+            local ok, err = pcall(function()
+                fireproximityprompt(prompt, Enum.ProximityPromptInputType.Keyboard, prompt.HoldDuration)
+            end)
+            if not ok then
+                log("[AutoChest] fireproximityprompt error: " .. tostring(err))
+            end
         end
 
-        local takeButton = getTakeButton()
-        if takeButton then
-            local ok, err = clickButton(takeButton)
-            if ok then
-                log("[AutoChest] clicked TakeButton")
-            else
-                log("[AutoChest] TakeButton click error: " .. tostring(err))
+        local chestFrame = getChestFrame()
+        local visible = chestFrame ~= nil and chestFrame.Visible
+
+        if visible ~= lastVisibleState then
+            log("[AutoChest] ChestFrame.Visible = " .. tostring(visible))
+            lastVisibleState = visible
+        end
+
+        if visible then
+            local takeButton = getTakeButton(chestFrame)
+            if takeButton then
+                local ok, err = clickButton(takeButton)
+                if ok then
+                    log("[AutoChest] clicked TakeButton")
+                else
+                    log("[AutoChest] TakeButton click error: " .. tostring(err))
+                end
             end
         end
     end)
