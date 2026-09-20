@@ -13,7 +13,6 @@
 return function(import)
 
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local log = import("core/logger")
 
 local CAPABILITIES = {
@@ -41,70 +40,58 @@ local function reportCapabilities()
     end
 end
 
--- Only the containers whose scripts could own the mining UI; dumping every
--- script in the game would bury the useful ones.
-local function reportScripts()
-    log("[Probe] === client scripts ===")
+-- The UI scripts live in PlayerScripts.UI.MineGame, not under MineGui -
+-- looking in the wrong place is why the first probe decompiled nothing.
+-- These are the ones that fire the remotes we're after.
+local WANTED_SCRIPTS = {
+    "MineChestClient",
+    "MineSellClient",
+    "MineSkillTreeClient",
+    "MineSlotFocusClient",
+    "MineHotbarClient",
+    "MineHUDClient",
+}
 
-    local player = Players.LocalPlayer
-    local roots = {
-        player:FindFirstChild("PlayerGui"),
-        player:FindFirstChild("PlayerScripts"),
-        ReplicatedStorage,
-    }
-
-    local count = 0
-    for _, root in ipairs(roots) do
-        if root then
-            for _, descendant in ipairs(root:GetDescendants()) do
-                if descendant:IsA("LocalScript") or descendant:IsA("ModuleScript") then
-                    count = count + 1
-                    if count <= 120 then
-                        log("[Probe] " .. descendant.ClassName .. " " .. descendant:GetFullName())
-                    end
-                end
-            end
-        end
-    end
-
-    log("[Probe] total scripts: " .. count .. (count > 120 and " (listing capped at 120)" or ""))
-end
-
--- Writes to its own file rather than the log: decompiled source runs to
--- thousands of lines and would bury everything else in MekPro.log.
+-- Writes to files rather than the log: decompiled source runs to thousands
+-- of lines and would bury everything else in MekPro.log.
 local function tryDecompile()
     if not decompile then
         log("[Probe] decompile unavailable - can't read the game's source this way")
         return
     end
 
-    local player = Players.LocalPlayer
-    local playerGui = player:FindFirstChild("PlayerGui")
-    local mineGui = playerGui and playerGui:FindFirstChild("MineGui")
-    if not mineGui then
-        log("[Probe] MineGui not found")
+    local playerScripts = Players.LocalPlayer:FindFirstChild("PlayerScripts")
+    local ui = playerScripts and playerScripts:FindFirstChild("UI")
+    local mineGame = ui and ui:FindFirstChild("MineGame")
+    if not mineGame then
+        log("[Probe] PlayerScripts.UI.MineGame not found")
         return
     end
 
-    for _, descendant in ipairs(mineGui:GetDescendants()) do
-        if descendant:IsA("LocalScript") or descendant:IsA("ModuleScript") then
-            local ok, source = pcall(decompile, descendant)
+    for _, name in ipairs(WANTED_SCRIPTS) do
+        local target = mineGame:FindFirstChild(name)
+        if not target then
+            log("[Probe] " .. name .. " not found")
+        else
+            local ok, source = pcall(decompile, target)
             if ok and type(source) == "string" and #source > 0 then
-                local path = "MekPro/decompiled_" .. descendant.Name .. ".lua"
+                local path = "MekPro/decompiled_" .. name .. ".lua"
                 local written = pcall(writefile, path, source)
-                log("[Probe] decompiled " .. descendant:GetFullName()
-                    .. " (" .. #source .. " chars) -> " .. (written and path or "write failed"))
+                log("[Probe] decompiled " .. name .. " (" .. #source .. " chars) -> "
+                    .. (written and path or "write failed"))
             else
-                log("[Probe] couldn't decompile " .. descendant:GetFullName())
+                log("[Probe] couldn't decompile " .. name .. ": " .. tostring(source))
             end
         end
     end
 end
 
+-- The capability and script listings already told us what we needed
+-- (decompile works; the UI scripts are in PlayerScripts.UI.MineGame), and
+-- the full listing is 636 entries, so only the decompile runs now.
 local function probe()
     log("[Probe] === start ===")
     reportCapabilities()
-    reportScripts()
     tryDecompile()
     log("[Probe] === end ===")
 end
