@@ -19,6 +19,12 @@
 -- ("141/3,600 Items") shows at least MIN_ITEMS_TO_COLLECT, so we're not
 -- taking a nearly-empty chest every second - per user request.
 --
+-- The item count never actually went down after clicking TakeButton, same
+-- symptom as Auto Sell before it: the server likely checks the player's
+-- REAL position for the actual collect action too, same as selling did.
+-- Teleport to the chest via core/teleport before opening it, and back once
+-- it closes.
+--
 -- Step() itself no longer owns a Heartbeat connection - core/turn_scheduler
 -- calls it only when it's this task's turn, so multiple autos never fire in
 -- the same frame and fight over the character.
@@ -28,6 +34,7 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
 local getPlotParts = import("games/my_anime_mine/get_plot_parts")
+local teleport = import("core/teleport")(import)
 local log = import("core/logger")
 
 local FIRE_INTERVAL = 0.5
@@ -98,6 +105,7 @@ function autoChest.SetEnabled(state)
         if chestFrame then
             setPiecesVisible(chestFrame, true)
         end
+        teleport.Return()
         log("[AutoChest] disabled")
     else
         nextOpenCheck = 0
@@ -132,6 +140,12 @@ function autoChest.Step()
     if visible ~= lastVisibleState then
         log("[AutoChest] ChestFrame.Visible = " .. tostring(visible))
         lastVisibleState = visible
+
+        if not visible then
+            -- Covers every way the frame can close: taking successfully,
+            -- closing a too-small chest, or the player closing it themselves.
+            teleport.Return()
+        end
     end
 
     if visible then
@@ -156,6 +170,8 @@ function autoChest.Step()
         local parts = plot and getPlotParts(plot)
         local prompt = parts and parts.Chest and parts.Chest:FindFirstChildWhichIsA("ProximityPrompt", true)
         if prompt then
+            teleport.To(prompt.Parent)
+
             local ok, err = pcall(function()
                 fireproximityprompt(prompt, Enum.ProximityPromptInputType.Keyboard, prompt.HoldDuration)
             end)
