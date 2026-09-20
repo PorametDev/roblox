@@ -104,6 +104,10 @@ UI.__index = UI
 
 function UI:AddTab(name, icon, opts)
     opts = opts or {}
+    -- Captured under its own name because `tab:AddCard` etc below are
+    -- colon methods too, and Lua's colon sugar gives each of THEM their
+    -- own `self` (bound to the tab) that shadows this one.
+    local window = self
 
     local tabButton = Instance.new("TextButton")
     tabButton.Name = name
@@ -223,7 +227,7 @@ function UI:AddTab(name, icon, opts)
             subtitleLbl.Parent = card
         end
 
-        table.insert(self.SearchIndex, { Frame = card, Title = title, Subtitle = subtitle })
+        table.insert(window.SearchIndex, { Frame = card, Title = title, Subtitle = subtitle })
 
         local cardApi = {}
         cardApi.Frame = card
