@@ -76,7 +76,7 @@ return function(import)
             log("[MyAnimeMine] no holders found")
         end
 
-        dumpBtn.Text = "done - see MekPro.log"
+        dumpBtn.Text = "Done"
     end)
 
     local settingsTab = window:AddTab("ตั้งค่า", "⚙")
