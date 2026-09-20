@@ -37,6 +37,9 @@ local maxPerPass = 5
 -- the bottleneck.
 local priority = "lowest"
 local buyPickaxe = true
+-- 0 means "work it out": buy the most expensive one we don't own yet and
+-- can actually afford, which is the best available upgrade.
+local pickaxeTarget = 0
 
 local autoUpgrade = {}
 local enabled = false
@@ -76,6 +79,10 @@ function autoUpgrade.SetBuyPickaxe(state)
     buyPickaxe = state
 end
 
+function autoUpgrade.SetPickaxeTarget(index)
+    pickaxeTarget = index
+end
+
 local function holders()
     local mine = gameApi.GetMineData()
     return mine and mine.Holders or {}
@@ -107,22 +114,46 @@ local function chooseStat(entry)
     return lowest
 end
 
--- The pickaxe is bought by tier index, and PickaxeTier in the state says
--- which one we're on, so the next one is simply the one after it.
+local function findPickaxe()
+    local pickaxes = gameApi.GetPickaxes()
+
+    if pickaxeTarget > 0 then
+        for _, pickaxe in ipairs(pickaxes) do
+            if pickaxe.index == pickaxeTarget and not pickaxe.owned then
+                return pickaxe
+            end
+        end
+        return nil
+    end
+
+    -- Most expensive affordable one we don't own: cost tracks quality, so
+    -- that's the best upgrade available right now.
+    local money = gameApi.GetMoney()
+    local best = nil
+    for _, pickaxe in ipairs(pickaxes) do
+        if not pickaxe.owned and pickaxe.cost <= money then
+            if not best or pickaxe.cost > best.cost then
+                best = pickaxe
+            end
+        end
+    end
+    return best
+end
+
 local function tryPickaxe()
-    local mine = gameApi.GetMineData()
-    local tier = mine and mine.PickaxeTier
-    if not tier then
+    local pickaxe = findPickaxe()
+    if not pickaxe then
         return false
     end
 
-    gameApi.BuyPickaxe(tier + 1)
+    gameApi.BuyPickaxe(pickaxe.index)
     task.wait(0.4)
 
-    local after = gameApi.GetMineData()
-    if after and (after.PickaxeTier or tier) > tier then
-        log("[AutoUpgrade] pickaxe tier " .. tier .. " -> " .. after.PickaxeTier)
-        return true
+    for _, current in ipairs(gameApi.GetPickaxes()) do
+        if current.index == pickaxe.index and current.owned then
+            log("[AutoUpgrade] bought pickaxe #" .. pickaxe.index .. " " .. pickaxe.name)
+            return true
+        end
     end
 
     return false

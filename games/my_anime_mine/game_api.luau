@@ -26,7 +26,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local log = import("core/logger")
 
 local api = {}
-local gameState, mineInventory
+local gameState, mineInventory, mineConfig
 local loadFailed = false
 
 local function modules()
@@ -38,6 +38,7 @@ local function modules()
         local moduleFolder = ReplicatedStorage:WaitForChild("Modules", 5)
         gameState = require(moduleFolder.GameState)
         mineInventory = require(moduleFolder.MineInventory)
+        mineConfig = require(moduleFolder.MineConfig)
     end)
 
     if not ok then
@@ -66,6 +67,56 @@ function api.GetMineData()
     end
 
     return data.MineGame
+end
+
+-- Money sits on Data2 itself rather than under MineGame.
+function api.GetMoney()
+    if not modules() then
+        return 0
+    end
+
+    local ok, data = pcall(gameState.GetData2)
+    if not ok or not data then
+        return 0
+    end
+
+    return tonumber(data.Money) or 0
+end
+
+-- MineConfig.Pickaxes is a plain array and MineBuyPickaxe takes the array
+-- index, so position in this list IS the argument. The shop hides free,
+-- robux-only and unstocked entries, so do the same - they can't be bought
+-- with cash.
+function api.GetPickaxes()
+    if not modules() then
+        return {}
+    end
+
+    local mine = api.GetMineData()
+    local owned = (mine and mine.Pickaxes) or {}
+    local list = {}
+
+    local ok = pcall(function()
+        for index, def in ipairs(mineConfig.Pickaxes) do
+            local buyableWithCash = not (mineConfig.IsPickaxeFree(def)
+                or def.RobuxOnly or type(def.Stock) ~= "table")
+
+            if buyableWithCash then
+                table.insert(list, {
+                    index = index,
+                    name = def.Name,
+                    cost = tonumber(def.Cost) or math.huge,
+                    owned = owned[def.Name] ~= nil,
+                })
+            end
+        end
+    end)
+
+    if not ok then
+        return {}
+    end
+
+    return list
 end
 
 function api.ChestCount()

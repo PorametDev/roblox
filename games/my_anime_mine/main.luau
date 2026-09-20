@@ -65,6 +65,7 @@ return function(import)
     local autoSell = import("games/my_anime_mine/auto_sell")(import)
     local autoUpgrade = import("games/my_anime_mine/auto_upgrade")(import)
     local autoResearch = import("games/my_anime_mine/auto_research")(import)
+    local gameApi = import("games/my_anime_mine/game_api")(import)
 
     -- Standalone: only fires ClickDetectors, which ignore distance, so
     -- these keep working no matter where an exclusive task has taken the
@@ -145,9 +146,47 @@ return function(import)
     )
     persistentToggle(
         farmTab:AddCard("Auto Upgrade: ซื้อ Pickaxe ด้วย",
-            "อัปเกรด pickaxe ไปเทียร์ถัดไปเมื่อเงินพอ"),
+            "ซื้อ pickaxe ตามที่เลือกด้านล่าง"),
         "autoUpgradePickaxe", autoUpgrade.SetBuyPickaxe
     )
+
+    -- The names come from MineConfig, so list the real ones rather than
+    -- making the user guess an index. 0 leaves the choice to Auto Upgrade,
+    -- which buys the best one it can afford.
+    local pickaxes = gameApi.GetPickaxes()
+    local pickaxeNames = {}
+    for _, pickaxe in ipairs(pickaxes) do
+        pickaxeNames[pickaxe.index] = pickaxe.name
+    end
+
+    local highestIndex = 0
+    for _, pickaxe in ipairs(pickaxes) do
+        highestIndex = math.max(highestIndex, pickaxe.index)
+    end
+
+    if highestIndex > 0 then
+        local pickaxeCard
+        local function describePick(index)
+            if index == 0 then
+                return "0 = เลือกอัตโนมัติ (ตัวที่ดีที่สุดที่ซื้อไหว)"
+            end
+            return "#" .. index .. " " .. (pickaxeNames[index] or "(ไม่มีตัวนี้ให้ซื้อด้วยเงิน)")
+        end
+
+        local savedPick = config.Get("autoUpgradePickaxeIndex", 0)
+        pickaxeCard = farmTab:AddSlider(
+            "Auto Upgrade: Pickaxe ที่จะซื้อ",
+            describePick(savedPick),
+            0, highestIndex, savedPick,
+            function(value)
+                config.Set("autoUpgradePickaxeIndex", value)
+                autoUpgrade.SetPickaxeTarget(value)
+                pickaxeCard:SetSubtitle(describePick(value))
+            end,
+            ""
+        )
+        autoUpgrade.SetPickaxeTarget(savedPick)
+    end
 
     persistentToggle(farmTab:AddCard(
         "Auto Research (Plot)",
