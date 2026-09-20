@@ -434,8 +434,52 @@ function api.SellItems(keys)
     return send("MineSellItems", keys)
 end
 
-function api.EquipSlot(key)
-    return send("MineEquipSlot", key)
+-- MineHotbarClient's number-key handler calls equipSlot(tostring(slot)),
+-- and MineGame.Hotbar is keyed by those strings - so the slot is "3", not
+-- 3. Sending the number meant the hold silently never happened, and Auto
+-- Place would pick a miner up, fail to hold anything, and leave the
+-- holder empty.
+--
+-- Passing "" unequips, which is the same call the game makes when you tap
+-- the slot you're already holding.
+function api.EquipSlot(slot)
+    return send("MineEquipSlot", slot == "" and "" or tostring(slot))
+end
+
+-- Which hotbar slot is in hand, straight from the game rather than
+-- inferred from a ProximityPrompt's label. The prompt only updates when
+-- you're standing next to a holder; this is true anywhere.
+function api.EquippedSlot()
+    if not modules() then
+        return nil
+    end
+
+    local mine = api.GetMineData()
+    if not mine then
+        return nil
+    end
+
+    local ok, slot = pcall(mineInventory.EquippedSlot, mine)
+    return ok and slot or nil
+end
+
+-- equipSlot refuses on both of these before it sends anything, so they're
+-- worth checking rather than firing and wondering.
+function api.HotbarHasSlot(slot)
+    local mine = api.GetMineData()
+    return mine ~= nil and (mine.Hotbar or {})[tostring(slot)] ~= nil
+end
+
+-- The usable part of the hotbar can be smaller than what's rendered.
+function api.IsSlotWithinCap(slot)
+    if not modules() then
+        return true
+    end
+    local ok, within = pcall(mineInventory.SlotWithinCap, tostring(slot))
+    if not ok then
+        return true
+    end
+    return within and true or false
 end
 
 function api.BuyPickaxe(tierIndex)

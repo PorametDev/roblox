@@ -34,8 +34,9 @@ local EMPTY_SLOT_TEXT = "Empty miner slot"
 local LOCKED_SLOT_TEXT = "Locked miner slot"
 -- Placing itself has no remote of its own - the holder's ProximityPrompt
 -- is handled server-side - so this still teleports and fires the prompt.
--- Holding a miner does though: MineEquipSlot takes the hotbar slot number,
--- which beats simulating a number-key press.
+-- Holding a miner does though: MineEquipSlot takes the hotbar slot key,
+-- which beats simulating a number-key press. Note KEY, not number - the
+-- game sends it as a string and MineGame.Hotbar is keyed that way.
 local upgradeWeakMiners = true
 
 local function findHolderPrompt(holder)
@@ -308,17 +309,33 @@ end
 
 -- "Place <name>" is the game confirming it sees the held miner. Pressing E
 -- before that does nothing.
-local function holdMiner(prompt, miner)
+-- Confirms the hold against MineInventory.EquippedSlot rather than the
+-- holder's ProximityPrompt text. The prompt only says "Place <name>" when
+-- the character is close enough for it to have refreshed, so a hold that
+-- had actually worked could still read as a failure - and the retry loop
+-- would then cycle every slot, unequipping and re-equipping, leaving the
+-- holder empty.
+local function holdMiner(miner)
+    -- Both of equipSlot's own preconditions, checked before sending so a
+    -- refusal is explained rather than silent.
+    if not gameApi.HotbarHasSlot(miner.slot) then
+        return false, "slot not in the hotbar"
+    end
+    if not gameApi.IsSlotWithinCap(miner.slot) then
+        return false, "slot past the usable cap"
+    end
+
     gameApi.EquipSlot(miner.slot)
 
-    for _ = 1, 8 do
+    local wanted = tostring(miner.slot)
+    for _ = 1, 10 do
         task.wait(0.1)
-        if prompt.ActionText and prompt.ActionText:find("Place", 1, true) then
+        if tostring(gameApi.EquippedSlot()) == wanted then
             return true
         end
     end
 
-    return false
+    return false, "server didn't equip it"
 end
 
 local function placeBest(holder, prompt)
@@ -330,7 +347,8 @@ local function placeBest(holder, prompt)
 
     local miner = nil
     for _, candidate in ipairs(candidates) do
-        if holdMiner(prompt, candidate) then
+        local held, why = holdMiner(candidate)
+        if held then
             miner = candidate
             break
         end
@@ -341,11 +359,14 @@ local function placeBest(holder, prompt)
         end
 
         log("[AutoPlace] slot " .. candidate.slot .. " (" .. candidate.name
-            .. ") didn't take, trying the next one")
+            .. ") didn't take: " .. tostring(why))
     end
 
-    -- ActionText is only a hint; the slot filling is the real proof.
-    miner = miner or candidates[1]
+    if not miner then
+        log("[AutoPlace] couldn't hold anything - not pressing E")
+        return false
+    end
+
     firePrompt(prompt)
     task.wait(0.5)
 
