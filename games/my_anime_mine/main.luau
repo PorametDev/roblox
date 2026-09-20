@@ -17,6 +17,7 @@ return function(import)
     local dumpRemotes = import("games/my_anime_mine/debug_dump_remotes")(import)
     local dumpSellCards = import("games/my_anime_mine/debug_dump_sell_cards")(import)
     local dumpGui = import("games/my_anime_mine/debug_dump_gui")(import)
+    local dumpChest = import("games/my_anime_mine/debug_dump_chest")(import)
     local autoMine = import("games/my_anime_mine/auto_mine")(import)
     local autoPlace = import("games/my_anime_mine/auto_place")(import)
     local autoChest = import("games/my_anime_mine/auto_chest")(import)
@@ -187,6 +188,16 @@ return function(import)
     guiDumpBtn = guiDumpCard:AddButton("Dump", function()
         dumpGui()
         guiDumpBtn.Text = "Done"
+    end)
+
+    local chestDumpCard = farmTab:AddCard(
+        "Debug: Dump Chest Data",
+        "หาว่าจำนวนของใน chest ถูกเก็บไว้ที่ไหน จะได้เช็คได้โดยไม่ต้องเปิด UI"
+    )
+    local chestDumpBtn
+    chestDumpBtn = chestDumpCard:AddButton("Dump", function()
+        local count = dumpChest()
+        chestDumpBtn.Text = count .. " parts"
     end)
 
     local settingsTab = window:AddTab("ตั้งค่า", "⚙")
