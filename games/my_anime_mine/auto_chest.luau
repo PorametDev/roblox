@@ -5,7 +5,10 @@
 -- happened. Fix: only fire the prompt when the frame is currently closed;
 -- click TakeButton on every tick it's open using multiple signals
 -- (MouseButton1Click, Activated, MouseButton1Down/Up) since we don't know
--- which one the game's script actually listens to.
+-- which one the game's script actually listens to. Also move ChestFrame
+-- off-screen while it's open (instead of touching .Visible, which the
+-- game's own scripts key off of) so the popup doesn't flash during
+-- automation.
 return function(import)
 
 local Players = game:GetService("Players")
@@ -15,6 +18,7 @@ local getPlotParts = import("games/my_anime_mine/get_plot_parts")
 local log = import("core/logger")
 
 local FIRE_INTERVAL = 0.5
+local HIDDEN_POSITION = UDim2.new(3, 0, 3, 0)
 
 local function getChestFrame()
     local playerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
@@ -50,6 +54,10 @@ function autoChest.SetEnabled(enabled)
     if not enabled then
         connection:Disconnect()
         connection = nil
+        local chestFrame = getChestFrame()
+        if chestFrame then
+            chestFrame.Position = chestFrame:GetAttribute("MekProOriginalPosition") or chestFrame.Position
+        end
         log("[AutoChest] disabled")
         return
     end
@@ -71,9 +79,15 @@ function autoChest.SetEnabled(enabled)
         if visible ~= lastVisibleState then
             log("[AutoChest] ChestFrame.Visible = " .. tostring(visible))
             lastVisibleState = visible
+
+            if visible and chestFrame:GetAttribute("MekProOriginalPosition") == nil then
+                chestFrame:SetAttribute("MekProOriginalPosition", chestFrame.Position)
+            end
         end
 
         if visible then
+            chestFrame.Position = HIDDEN_POSITION
+
             local takeButton = getTakeButton(chestFrame)
             if takeButton then
                 clickButton(takeButton)
