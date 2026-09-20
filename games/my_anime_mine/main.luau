@@ -16,8 +16,7 @@ return function(import)
     local dumpRemotes = import("games/my_anime_mine/debug_dump_remotes")(import)
     local autoMine = import("games/my_anime_mine/auto_mine")(import)
     local autoPlace = import("games/my_anime_mine/auto_place")(import)
-    local autoTakeChest = import("games/my_anime_mine/auto_take_chest")(import)
-    local autoOpenChest = import("games/my_anime_mine/auto_open_chest")(import)
+    local autoChest = import("games/my_anime_mine/auto_chest")(import)
     local autoSell = import("games/my_anime_mine/auto_sell")(import)
     local autoUpgrade = import("games/my_anime_mine/auto_upgrade")(import)
 
@@ -38,10 +37,10 @@ return function(import)
     end)
 
     farmTab:AddCard(
-        "Auto Open Chest",
-        "กด ChestPrompt ให้อัตโนมัติ เพื่อให้หน้า Take All โผล่ขึ้นมา"
+        "Auto Chest",
+        "เปิด chest แล้วเก็บของอัตโนมัติในตัวเดียว (ยิง ChestPrompt + ClaimOre/CollectAll)"
     ):AddToggle(false, function(state)
-        autoOpenChest.SetEnabled(state)
+        autoChest.SetEnabled(state)
     end)
 
     farmTab:AddCard(
@@ -179,8 +178,7 @@ return function(import)
     window:OnDestroy(function()
         autoMine.SetEnabled(false)
         autoPlace.SetEnabled(false)
-        autoTakeChest.SetEnabled(false)
-        autoOpenChest.SetEnabled(false)
+        autoChest.SetEnabled(false)
         antiAfk.SetEnabled(false)
         interactionLogger.SetEnabled(false)
         autoSell.SetEnabled(false)

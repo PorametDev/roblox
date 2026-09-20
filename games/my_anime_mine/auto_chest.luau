@@ -1,38 +1,40 @@
--- Fires ClaimOre and CollectAll directly (found via Debug: Dump All
--- Remotes) instead of finding and simulating a click on the "Take All"
--- GUI button - no UI dependency at all now.
+-- Combines opening the chest and claiming its contents into one loop, so
+-- there's only one toggle instead of needing "open" and "take" enabled
+-- together to actually get anything.
 return function(import)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
+local getPlotParts = import("games/my_anime_mine/get_plot_parts")
 local log = import("core/logger")
 
-local FIRE_INTERVAL = 0.5
+local FIRE_INTERVAL = 1
 
 local function getRemote(name)
     local remotes = ReplicatedStorage:FindFirstChild("Remotes")
     return remotes and remotes:FindFirstChild(name)
 end
 
-local autoTakeChest = {}
+local autoChest = {}
 local connection = nil
 
-function autoTakeChest.SetEnabled(enabled)
-    if enabled == autoTakeChest.IsEnabled() then
+function autoChest.SetEnabled(enabled)
+    if enabled == autoChest.IsEnabled() then
         return
     end
 
     if not enabled then
         connection:Disconnect()
         connection = nil
-        log("[AutoTakeChest] disabled")
+        log("[AutoChest] disabled")
         return
     end
 
     local claimOre = getRemote("ClaimOre")
     local collectAll = getRemote("CollectAll")
     log(string.format(
-        "[AutoTakeChest] enabled (ClaimOre=%s, CollectAll=%s)",
+        "[AutoChest] enabled (ClaimOre=%s, CollectAll=%s)",
         tostring(claimOre ~= nil), tostring(collectAll ~= nil)
     ))
 
@@ -44,6 +46,13 @@ function autoTakeChest.SetEnabled(enabled)
             return
         end
         lastFire = now
+
+        local plot = getCurrentPlot()
+        local parts = plot and getPlotParts(plot)
+        local prompt = parts and parts.Chest and parts.Chest:FindFirstChildWhichIsA("ProximityPrompt", true)
+        if prompt then
+            fireproximityprompt(prompt)
+        end
 
         if claimOre then
             pcall(function()
@@ -58,10 +67,10 @@ function autoTakeChest.SetEnabled(enabled)
     end)
 end
 
-function autoTakeChest.IsEnabled()
+function autoChest.IsEnabled()
     return connection ~= nil
 end
 
-return autoTakeChest
+return autoChest
 
 end
