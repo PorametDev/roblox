@@ -7,13 +7,9 @@
 -- sell closing the frame on its own never triggered the return, stranding
 -- the character at the SellStand).
 --
--- SellFrame also kept flashing on screen. Moving the whole frame's Position
--- off-screen was the wrong fix - its Backdrop (the full-screen dim behind
--- the popup) blocked the player from clicking anything else in the game
--- while "hidden" this way. Instead we hide only the visible pieces
--- (Content, Backdrop, Close) via .Visible, leaving SellFrame itself
--- untouched so the game's own open/close state and our own Visible check
--- both keep working normally, and the player's other UI stays clickable.
+-- Popup-hiding (Content/Backdrop/Close) was pulled out entirely - it ended
+-- up hiding the game's whole UI for the user. Revisit later once selling
+-- is confirmed actually working end to end.
 --
 -- Step() itself no longer owns a Heartbeat connection - core/turn_scheduler
 -- calls it only when it's this task's turn, so multiple autos never fire in
@@ -22,13 +18,11 @@ return function(import)
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-local RunService = game:GetService("RunService")
 local teleport = import("core/teleport")(import)
 local log = import("core/logger")
 
 local FIRE_INTERVAL = 0.5
 local RECHECK_COOLDOWN = 5
-local HIDDEN_PIECE_NAMES = { "Content", "Backdrop", "Close" }
 
 local function getSellFrame()
     local playerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
@@ -79,16 +73,6 @@ local enabled = false
 local lastFire = 0
 local lastVisibleState = nil
 local nextOpenCheck = 0
-local hideConnection = nil
-
-local function setPiecesVisible(sellFrame, isVisible)
-    for _, name in ipairs(HIDDEN_PIECE_NAMES) do
-        local piece = sellFrame:FindFirstChild(name)
-        if piece then
-            piece.Visible = isVisible
-        end
-    end
-end
 
 function autoSell.SetEnabled(state)
     if state == enabled then
@@ -97,24 +81,10 @@ function autoSell.SetEnabled(state)
     enabled = state
 
     if not enabled then
-        if hideConnection then
-            hideConnection:Disconnect()
-            hideConnection = nil
-        end
-        local sellFrame = getSellFrame()
-        if sellFrame then
-            setPiecesVisible(sellFrame, true)
-        end
         teleport.Return()
         log("[AutoSell] disabled")
     else
         nextOpenCheck = 0
-        hideConnection = RunService.Heartbeat:Connect(function()
-            local sellFrame = getSellFrame()
-            if sellFrame and sellFrame.Visible then
-                setPiecesVisible(sellFrame, false)
-            end
-        end)
         log("[AutoSell] enabled (only sells when there's something in the scroll)")
     end
 end

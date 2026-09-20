@@ -1,27 +1,22 @@
--- Two bugs found from the Visible-transition log: (1) we kept firing the
--- ProximityPrompt every tick even while ChestFrame was already open, which
--- toggled it closed again before TakeButton could do anything (open/close
--- looped forever). (2) TakeButton's own label never confirmed anything
--- happened. Fix: only fire the prompt when the frame is currently closed;
--- click TakeButton on every tick it's open using multiple signals
--- (MouseButton1Click, Activated, MouseButton1Down/Up) since we don't know
--- which one the game's script actually listens to.
+-- Hiding ChestFrame's Content/Backdrop/Close caused the game's whole UI to
+-- disappear for the user - pulled out entirely for now so the game stays
+-- usable. Once Take All is confirmed actually collecting (teleporting to
+-- the chest first, below), popup-hiding can be revisited more carefully.
 --
--- ChestFrame also kept flashing on screen. Moving the whole frame's Position
--- off-screen was the wrong fix - its Backdrop (the full-screen dim behind
--- the popup) blocked the player from clicking anything else in the game
--- while "hidden" this way. Instead we hide only the visible pieces
--- (Content, Backdrop, Close) via .Visible, leaving ChestFrame itself
--- untouched so the game's own open/close state and our own Visible check
--- both keep working normally, and the player's other UI stays clickable.
+-- Two bugs found earlier from the Visible-transition log: (1) we kept
+-- firing the ProximityPrompt every tick even while ChestFrame was already
+-- open, which toggled it closed again before TakeButton could do anything
+-- (open/close looped forever). (2) TakeButton's own label never confirmed
+-- anything happened. Fix: only fire the prompt when the frame is currently
+-- closed; click TakeButton on every tick it's open.
 --
 -- Only actually collects once the chest's own progress label
 -- ("141/3,600 Items") shows at least MIN_ITEMS_TO_COLLECT, so we're not
 -- taking a nearly-empty chest every second - per user request.
 --
 -- The item count never actually went down after clicking TakeButton, same
--- symptom as Auto Sell before it: the server likely checks the player's
--- REAL position for the actual collect action too, same as selling did.
+-- symptom Auto Sell had: the server likely checks the player's REAL
+-- position for the actual collect action too, same as selling did.
 -- Teleport to the chest via core/teleport before opening it, and back once
 -- it closes.
 --
@@ -31,7 +26,6 @@
 return function(import)
 
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
 local getPlotParts = import("games/my_anime_mine/get_plot_parts")
 local teleport = import("core/teleport")(import)
@@ -40,7 +34,6 @@ local log = import("core/logger")
 local FIRE_INTERVAL = 0.5
 local RECHECK_COOLDOWN = 5
 local MIN_ITEMS_TO_COLLECT = 100
-local HIDDEN_PIECE_NAMES = { "Content", "Backdrop", "Close" }
 
 local function getChestFrame()
     local playerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
@@ -63,11 +56,6 @@ local function getItemCount(chestFrame)
     return tonumber(digits)
 end
 
--- Firing multiple signals at once double-toggled Auto Sell's SelectAllButton
--- (it never advanced past "Select All"). Activated alone is the one
--- Interaction Logger confirms actually reaches the game's handler, and
--- TakeButton/Close here are one-shot actions so this is just as reliable
--- for them.
 local function clickButton(button)
     pcall(function()
         firesignal(button.Activated)
@@ -79,16 +67,6 @@ local enabled = false
 local lastFire = 0
 local lastVisibleState = nil
 local nextOpenCheck = 0
-local hideConnection = nil
-
-local function setPiecesVisible(chestFrame, isVisible)
-    for _, name in ipairs(HIDDEN_PIECE_NAMES) do
-        local piece = chestFrame:FindFirstChild(name)
-        if piece then
-            piece.Visible = isVisible
-        end
-    end
-end
 
 function autoChest.SetEnabled(state)
     if state == enabled then
@@ -97,24 +75,10 @@ function autoChest.SetEnabled(state)
     enabled = state
 
     if not enabled then
-        if hideConnection then
-            hideConnection:Disconnect()
-            hideConnection = nil
-        end
-        local chestFrame = getChestFrame()
-        if chestFrame then
-            setPiecesVisible(chestFrame, true)
-        end
         teleport.Return()
         log("[AutoChest] disabled")
     else
         nextOpenCheck = 0
-        hideConnection = RunService.Heartbeat:Connect(function()
-            local chestFrame = getChestFrame()
-            if chestFrame and chestFrame.Visible then
-                setPiecesVisible(chestFrame, false)
-            end
-        end)
         log("[AutoChest] enabled (collects once >= " .. MIN_ITEMS_TO_COLLECT .. " items)")
     end
 end
