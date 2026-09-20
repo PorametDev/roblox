@@ -51,12 +51,12 @@ return function(import)
     local autoChest = import("games/my_anime_mine/auto_chest")(import)
     local autoSell = import("games/my_anime_mine/auto_sell")(import)
     local autoUpgrade = import("games/my_anime_mine/auto_upgrade")(import)
+    local autoResearch = import("games/my_anime_mine/auto_research")(import)
 
     -- Standalone: only fires ClickDetectors, which ignore distance, so
     -- these keep working no matter where an exclusive task has taken the
     -- character and never need to wait for a turn.
     scheduler.RegisterStandalone("AutoMine", autoMine.Step, autoMine.IsEnabled)
-    scheduler.RegisterStandalone("AutoUpgrade", autoUpgrade.Step, autoUpgrade.IsEnabled)
 
     -- Exclusive: each needs the character standing somewhere specific (the
     -- server checks real position) or a menu open on screen, so only one
@@ -67,6 +67,8 @@ return function(import)
     -- and picks up whatever time the others aren't using.
     scheduler.RegisterExclusive("AutoChest", autoChest.Step, autoChest.IsEnabled, autoChest.IsBusy, autoChest.HasWork)
     scheduler.RegisterExclusive("AutoPlace", autoPlace.Step, autoPlace.IsEnabled, autoPlace.IsBusy, autoPlace.HasWork)
+    scheduler.RegisterExclusive("AutoUpgrade", autoUpgrade.Step, autoUpgrade.IsEnabled, autoUpgrade.IsBusy)
+    scheduler.RegisterExclusive("AutoResearch", autoResearch.Step, autoResearch.IsEnabled, autoResearch.IsBusy)
     scheduler.RegisterExclusive("AutoSell", autoSell.Step, autoSell.IsEnabled, autoSell.IsBusy)
 
     scheduler.Start()
@@ -110,11 +112,22 @@ return function(import)
         10, 300, "autoSellInterval", 45, autoSell.SetCheckInterval, "s")
 
     persistentToggle(farmTab:AddCard(
-        "Auto Upgrade",
-        "กด UpgradeClick ทุก Holder อัตโนมัติเมื่อมีเงินพอ"
+        "Auto Upgrade Unit",
+        "เปิดหน้าอัปเกรดของ miner ที่วางอยู่ แล้วซื้อ Damage/Speed/Mining ที่ราคาไม่เกินงบ"
     ), "autoUpgrade", autoUpgrade.SetEnabled)
-    persistentSlider(farmTab, "Auto Upgrade: รอบกด", "กด UpgradeClick ทุกกี่วินาที",
-        1, 30, "autoUpgradeInterval", 1, autoUpgrade.SetInterval, "s")
+    persistentSlider(farmTab, "Auto Upgrade: รอบเช็ค", "ไล่อัปเกรด miner ทุกกี่วินาที",
+        5, 300, "autoUpgradeInterval", 20, autoUpgrade.SetInterval, "s")
+    persistentSlider(farmTab, "Auto Upgrade: งบต่อครั้ง", "ไม่ซื้ออะไรที่แพงกว่านี้",
+        1000, 1000000, "autoUpgradeMaxSpend", 100000, autoUpgrade.SetMaxSpend, "$")
+
+    persistentToggle(farmTab:AddCard(
+        "Auto Research (Plot)",
+        "เปิดหน้า Upgrades แล้วซื้อ node ที่ปลดได้ในทุกโซน เรียงจากถูกไปแพง"
+    ), "autoResearch", autoResearch.SetEnabled)
+    persistentSlider(farmTab, "Auto Research: รอบเช็ค", "เปิดหน้า research ทุกกี่วินาที",
+        10, 600, "autoResearchInterval", 30, autoResearch.SetCheckInterval, "s")
+    persistentSlider(farmTab, "Auto Research: งบต่อครั้ง", "ไม่ซื้อ node ที่แพงกว่านี้",
+        1000, 1000000, "autoResearchMaxSpend", 100000, autoResearch.SetMaxSpend, "$")
 
     -- Everything below lives in its own tab so shipping a release is just
     -- deleting this block - no debug controls tangled up with the real
@@ -294,5 +307,6 @@ return function(import)
         interactionLogger.SetEnabled(false)
         autoSell.SetEnabled(false)
         autoUpgrade.SetEnabled(false)
+        autoResearch.SetEnabled(false)
     end)
 end
