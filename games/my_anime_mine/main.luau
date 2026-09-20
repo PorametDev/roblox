@@ -51,6 +51,13 @@ return function(import)
             return
         end
 
+        local ok, err = log("[MyAnimeMine] === Dump start ===")
+        if not ok then
+            dumpBtn.Text = "log failed"
+            log("[MyAnimeMine] logging error: " .. tostring(err))
+            return
+        end
+
         local parts = getPlotParts(plot)
 
         local firstNode = parts.Nodes and parts.Nodes:GetChildren()[1]
