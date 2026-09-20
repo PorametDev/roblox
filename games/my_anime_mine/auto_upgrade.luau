@@ -1,7 +1,7 @@
 -- UpgradeClick fired fine manually despite MaxActivationDistance=0
 -- (confirmed via Interaction Logger), same as NodeClick for mining.
--- No longer owns its own Heartbeat connection - core/turn_scheduler calls
--- Step() only when it's this task's turn.
+-- Registered with core/scheduler as STANDALONE: same as Auto Mine, firing a
+-- ClickDetector ignores distance, so it never needs a turn.
 return function(import)
 
 local getCurrentPlot = import("games/my_anime_mine/get_current_plot")

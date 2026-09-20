@@ -3,9 +3,9 @@
 -- card), and only then select+sell - the whole thing runs to completion as
 -- one job instead of repeatedly re-clicking every tick while the frame
 -- stays open (that's what caused the SelectAllButton loop before).
--- core/turn_scheduler calls Step() often, but a new job only starts every
--- CHECK_INTERVAL and while `busy` is true every call until the current job
--- finishes is a no-op.
+-- Registered with core/scheduler as EXCLUSIVE: a new job only starts every
+-- CHECK_INTERVAL, and while `busy` is true no other exclusive task runs -
+-- this one's teleport home used to land right on Auto Chest's Take All.
 --
 -- Note: whether there's anything to sell can only be read from the cards
 -- inside the sell menu itself (nothing exposes it before opening), so

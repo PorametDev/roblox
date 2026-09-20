@@ -1,6 +1,7 @@
--- No longer owns its own Heartbeat connection - core/turn_scheduler calls
--- Step() only when it's this task's turn, so multiple autos never fire in
--- the same frame and fight over the character.
+-- Registered with core/scheduler as EXCLUSIVE: equipping a tool and firing
+-- a holder's prompt both act on the character, and the server checks real
+-- position for placement, so this must not run while Auto Sell/Auto Chest
+-- have the character teleported elsewhere.
 return function(import)
 
 local Players = game:GetService("Players")

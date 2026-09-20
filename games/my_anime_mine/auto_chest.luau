@@ -6,9 +6,9 @@
 --
 -- Once the threshold is met the whole collect runs as a single one-shot
 -- job: teleport, open, click Take All, verify the count dropped, teleport
--- back. core/turn_scheduler calls Step() often, but a new job only starts
--- every CHECK_INTERVAL, and while `busy` is true every call - from any
--- task - is a no-op, so nothing teleports the character mid-job.
+-- back. Registered with core/scheduler as EXCLUSIVE: a new job only starts
+-- every CHECK_INTERVAL, and while `busy` is true no other exclusive task
+-- runs, so nothing teleports the character mid-job.
 --
 -- The item count previously never actually went down after clicking
 -- TakeButton: the server checks the player's REAL position for the collect

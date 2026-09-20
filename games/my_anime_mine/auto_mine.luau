@@ -1,6 +1,6 @@
--- No longer owns its own Heartbeat connection - core/turn_scheduler calls
--- Step() only when it's this task's turn, so multiple autos never fire in
--- the same frame and fight over the character.
+-- Registered with core/scheduler as STANDALONE: firing a ClickDetector
+-- ignores distance, so this keeps mining no matter where Auto Sell or Auto
+-- Chest have taken the character, and never waits for a turn.
 return function(import)
 
 local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
