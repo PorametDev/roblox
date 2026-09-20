@@ -14,11 +14,11 @@ return function(import)
     local farmTab = window:AddTab("ฟาร์ม", "🏠")
     -- Business logic for My Anime Mine goes here.
 
-    local debugCard = farmTab:AddCard("Debug: Current Plot", "กดเพื่อเช็ค plot ปัจจุบัน (ผลขึ้นตรงนี้ ไม่ต้องพึ่ง console)")
-    debugCard:AddButton("Check", function()
+    local debugCard = farmTab:AddCard("Debug: Current Plot", "กดเพื่อเช็ค plot ปัจจุบัน (ผลขึ้นตรงบนปุ่มเอง ไม่ต้องพึ่ง console)")
+    local checkBtn = debugCard:AddButton("Check", function()
         local plot = getCurrentPlot()
         if not plot then
-            debugCard:SetValue("not found")
+            checkBtn.Text = "not found"
             log("[MyAnimeMine] not standing in any plot")
             return
         end
@@ -27,7 +27,7 @@ return function(import)
         local nodeCount = parts.Nodes and #parts.Nodes:GetChildren() or 0
         local holderCount = parts.Holders and #parts.Holders:GetChildren() or 0
 
-        debugCard:SetValue(plot.Name)
+        checkBtn.Text = plot.Name
         log(string.format(
             "[MyAnimeMine] current plot: %s | Nodes: %d | Holders: %d",
             plot.Name, nodeCount, holderCount
