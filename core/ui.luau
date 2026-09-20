@@ -448,6 +448,17 @@ end
 local function createWindow(config)
     config = config or {}
 
+    -- Re-running the loader script (e.g. testing the same URL repeatedly)
+    -- otherwise leaves the previous window's UI AND its background loops
+    -- (Anti-AFK, auto-mine, etc, via OnDestroy below) running forever,
+    -- invisible and uncontrolled by the new one's toggles.
+    local env = getgenv and getgenv() or _G
+    if env.MekProWindow then
+        pcall(function()
+            env.MekProWindow:Destroy()
+        end)
+    end
+
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "CoreUI"
     screenGui.ResetOnSpawn = false
@@ -644,6 +655,7 @@ local function createWindow(config)
     self.Connections = connections
     self.UIScale = uiScale
     self.SearchIndex = {}
+    self.DestroyListeners = {}
 
     table.insert(connections, minimizeBtn.MouseButton1Click:Connect(function()
         setMinimized(not minimized)
@@ -684,7 +696,16 @@ local function createWindow(config)
     end)
     self.UnsubscribeLanguage = unsubscribeLanguage
 
+    env.MekProWindow = self
+
     return self
+end
+
+-- Registers a function to run when the window is torn down (X button, or
+-- auto-cleanup from a fresh loader run). Use this to stop background loops
+-- (auto-mine, anti-afk, ...) that outlive the UI itself otherwise.
+function UI:OnDestroy(callback)
+    table.insert(self.DestroyListeners, callback)
 end
 
 -- Tears the whole UI down: disconnects every listener this window created and
@@ -693,6 +714,9 @@ end
 function UI:Destroy()
     for _, connection in ipairs(self.Connections) do
         connection:Disconnect()
+    end
+    for _, listener in ipairs(self.DestroyListeners) do
+        pcall(listener)
     end
     self.UnsubscribeLanguage()
     self.ScreenGui:Destroy()

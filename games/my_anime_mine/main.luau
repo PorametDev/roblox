@@ -14,6 +14,7 @@ return function(import)
     local dumpInstance = import("games/my_anime_mine/debug_dump")
     local autoMine = import("games/my_anime_mine/auto_mine")(import)
     local autoPlace = import("games/my_anime_mine/auto_place")(import)
+    local autoTakeChest = import("games/my_anime_mine/auto_take_chest")(import)
 
     local farmTab = window:AddTab("ฟาร์ม", "🏠")
 
@@ -128,5 +129,15 @@ return function(import)
     settingsTab:AddSegmented({ "ตามเครื่อง", "อังกฤษ", "ไทย" }, 1, function(index, value)
         local code = ({ "auto", "en", "th" })[index]
         i18n.SetLanguage(code)
+    end)
+
+    -- Without this, closing the UI (or the loader auto-cleaning up a
+    -- previous run) leaves these background loops running forever,
+    -- invisible and no longer controllable from any toggle.
+    window:OnDestroy(function()
+        autoMine.SetEnabled(false)
+        autoPlace.SetEnabled(false)
+        autoTakeChest.SetEnabled(false)
+        antiAfk.SetEnabled(false)
     end)
 end
