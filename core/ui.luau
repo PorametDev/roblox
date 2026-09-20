@@ -1,16 +1,20 @@
+return function(import)
+
+local i18n = import("core/i18n")
 local UserInputService = game:GetService("UserInputService")
 
--- Theme: ported from S:\emc-pos\packages\core\ires_theme (dark scheme). Swap
--- these to re-skin every game at once.
+-- Theme: ported from S:\emc-pos\packages\core\ires_theme. Default is the
+-- light scheme (white cards on a light grey page); swap these to re-skin
+-- every game at once.
 local THEME = {
     BrandName = "MekPro",
-    Background = Color3.fromRGB(0x25, 0x25, 0x25), -- IresPalette.black (surfaceContainer, dark)
-    Card = Color3.fromRGB(0x37, 0x3D, 0x42), -- IresPalette.dark900 (surface, dark)
-    CardHover = Color3.fromRGB(0x3E, 0x45, 0x4C), -- IresPalette.dark800
+    Background = Color3.fromRGB(0xF1, 0xF2, 0xF6), -- IresPalette.light50 (surfaceContainer, light)
+    Card = Color3.fromRGB(0xFE, 0xFE, 0xFE), -- IresPalette.white (surface, light)
+    CardHover = Color3.fromRGB(0xE9, 0xEA, 0xF0), -- IresPalette.light100
     Accent = Color3.fromRGB(0x1C, 0xAF, 0x82), -- IresPalette.primary500
-    ToggleOff = Color3.fromRGB(0x51, 0x5F, 0x69), -- IresPalette.dark600 (outlineVariant, dark)
-    Text = Color3.fromRGB(0xF4, 0xF6, 0xF7), -- IresPalette.dark50 (onSurface, dark)
-    SubText = Color3.fromRGB(0xA6, 0xB4, 0xBA), -- IresPalette.dark300 (onSurfaceVariant, dark)
+    ToggleOff = Color3.fromRGB(0xE3, 0xE7, 0xEA), -- IresPalette.dark100 (outlineVariant, light)
+    Text = Color3.fromRGB(0x25, 0x25, 0x25), -- IresPalette.black (onSurface, light)
+    SubText = Color3.fromRGB(0x5F, 0x71, 0x7B), -- IresPalette.dark500 (onSurfaceVariant, light)
     Premium = Color3.fromRGB(0xFD, 0x64, 0x12), -- IresPalette.secondary500
     Badge = Color3.fromRGB(0xFD, 0x64, 0x12), -- IresPalette.secondary500
     Font = Enum.Font.GothamMedium,
@@ -48,18 +52,26 @@ local function padding(instance, amount)
     return p
 end
 
-local function makeDraggable(handle, target)
-    local dragging, dragInput, dragStart, startPos
+-- Drags `target` by clicking/touching anywhere on `handle`. If the pointer
+-- never moves past a small threshold, treats it as a tap and fires
+-- `onClick` instead - lets a single element (e.g. the collapsed avatar)
+-- both be dragged and act as a button.
+local function makeDraggable(handle, target, onClick)
+    local dragging, dragInput, dragStart, startPos, moved
     local connections = {}
 
     table.insert(connections, handle.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
+            moved = false
             dragStart = input.Position
             startPos = target.Position
             table.insert(connections, input.Changed:Connect(function()
                 if input.UserInputState == Enum.UserInputState.End then
                     dragging = false
+                    if onClick and not moved then
+                        onClick()
+                    end
                 end
             end))
         end
@@ -74,6 +86,9 @@ local function makeDraggable(handle, target)
     table.insert(connections, UserInputService.InputChanged:Connect(function(input)
         if input == dragInput and dragging then
             local delta = input.Position - dragStart
+            if delta.Magnitude > 3 then
+                moved = true
+            end
             target.Position = UDim2.new(
                 startPos.X.Scale, startPos.X.Offset + delta.X,
                 startPos.Y.Scale, startPos.Y.Offset + delta.Y
@@ -393,8 +408,17 @@ local function createWindow(config)
     main.Size = UDim2.new(0, 430, 0, 620)
     main.Position = UDim2.new(0.5, -215, 0.5, -310)
     main.BackgroundColor3 = THEME.Background
+    -- Lets the window be dragged from anywhere on its body, not just the
+    -- header - see the Active note on the old header-only drag handle.
+    main.Active = true
     main.Parent = screenGui
     corner(main, RADIUS.Card)
+    local expandedSize = main.Size
+    local collapsedSize = UDim2.new(0, 64, 0, 64)
+
+    local uiScale = Instance.new("UIScale")
+    uiScale.Scale = 1
+    uiScale.Parent = main
 
     -- Header: icon tab bar
     local tabBar = Instance.new("Frame")
@@ -415,19 +439,23 @@ local function createWindow(config)
     header.Size = UDim2.new(1, -24, 0, 48)
     header.Position = UDim2.new(0, 12, 0, 64)
     header.BackgroundTransparency = 1
-    -- Frames default Active to false, which silently drops InputBegan/
-    -- InputChanged - without this, dragging the window never fires at all.
-    header.Active = true
     header.Parent = main
 
-    local avatar = Instance.new("TextLabel")
+    -- A direct child of `main` (not `header`) so it survives header.Visible
+    -- = false when collapsed. Its expanded position is chosen to land
+    -- exactly where it used to sit inside `header`.
+    local avatarExpandedPos = UDim2.new(0, 12, 0, 64)
+    local avatarCollapsedPos = UDim2.new(0, 12, 0, 12)
+    local avatar = Instance.new("TextButton")
     avatar.Size = UDim2.new(0, 40, 0, 40)
+    avatar.Position = avatarExpandedPos
     avatar.BackgroundColor3 = THEME.Accent
+    avatar.AutoButtonColor = false
     avatar.Text = config.Avatar or THEME.BrandName:sub(1, 1)
     avatar.Font = THEME.Font
     avatar.TextSize = 18
     avatar.TextColor3 = THEME.Background
-    avatar.Parent = header
+    avatar.Parent = main
     corner(avatar, RADIUS.Control)
 
     local titleLbl = Instance.new("TextLabel")
@@ -480,7 +508,7 @@ local function createWindow(config)
     searchBox.Size = UDim2.new(1, -24, 0, 36)
     searchBox.Position = UDim2.new(0, 12, 0, 118)
     searchBox.BackgroundColor3 = THEME.Card
-    searchBox.PlaceholderText = "ค้นหาฟังก์ชัน..."
+    searchBox.PlaceholderText = i18n.T("search_placeholder")
     searchBox.Text = ""
     searchBox.Font = Enum.Font.Gotham
     searchBox.TextSize = 13
@@ -509,7 +537,7 @@ local function createWindow(config)
     local footerLabel = Instance.new("TextLabel")
     footerLabel.Size = UDim2.new(1, -80, 1, 0)
     footerLabel.BackgroundTransparency = 1
-    footerLabel.Text = "ปุ่มเปิดเมนู"
+    footerLabel.Text = i18n.T("open_menu_hint")
     footerLabel.Font = Enum.Font.Gotham
     footerLabel.TextSize = 12
     footerLabel.TextColor3 = THEME.SubText
@@ -528,7 +556,33 @@ local function createWindow(config)
     keybindLabel.Parent = footer
     corner(keybindLabel, RADIUS.Small)
 
-    local connections = makeDraggable(header, main)
+    local minimized = false
+
+    local function setMinimized(state)
+        minimized = state
+        tabBar.Visible = not minimized
+        header.Visible = not minimized
+        searchBox.Visible = not minimized
+        content.Visible = not minimized
+        footer.Visible = not minimized
+        main.Size = minimized and collapsedSize or expandedSize
+        avatar.Position = minimized and avatarCollapsedPos or avatarExpandedPos
+    end
+
+    -- Whole-window drag (works from any empty spot on `main`, since active
+    -- children like buttons/toggles/sliders capture their own input first
+    -- and never let it reach this handler).
+    local connections = makeDraggable(main, main)
+
+    -- The collapsed state's only visible/interactive element: drag it like
+    -- the rest of the window, but a plain tap (no movement) restores it.
+    for _, connection in ipairs(makeDraggable(avatar, main, function()
+        if minimized then
+            setMinimized(false)
+        end
+    end)) do
+        table.insert(connections, connection)
+    end
 
     local self = setmetatable({}, UI)
     self.ScreenGui = screenGui
@@ -538,15 +592,10 @@ local function createWindow(config)
     self.SearchBox = searchBox
     self.Tabs = {}
     self.Connections = connections
+    self.UIScale = uiScale
 
-    local minimized = false
-    local expandedSize = main.Size
     table.insert(connections, minimizeBtn.MouseButton1Click:Connect(function()
-        minimized = not minimized
-        searchBox.Visible = not minimized
-        content.Visible = not minimized
-        footer.Visible = not minimized
-        main.Size = minimized and UDim2.new(expandedSize.X.Scale, expandedSize.X.Offset, 0, 112) or expandedSize
+        setMinimized(not minimized)
     end))
 
     table.insert(connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -562,6 +611,12 @@ local function createWindow(config)
         self:Destroy()
     end))
 
+    local unsubscribeLanguage = i18n.OnChanged(function()
+        searchBox.PlaceholderText = i18n.T("search_placeholder")
+        footerLabel.Text = i18n.T("open_menu_hint")
+    end)
+    self.UnsubscribeLanguage = unsubscribeLanguage
+
     return self
 end
 
@@ -572,7 +627,15 @@ function UI:Destroy()
     for _, connection in ipairs(self.Connections) do
         connection:Disconnect()
     end
+    self.UnsubscribeLanguage()
     self.ScreenGui:Destroy()
 end
 
+-- percent is whatever range the caller's AddSlider uses (e.g. 50-150).
+function UI:SetScale(percent)
+    self.UIScale.Scale = percent / 100
+end
+
 return createWindow
+
+end

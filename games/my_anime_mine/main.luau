@@ -1,5 +1,6 @@
 return function(import)
-    local createWindow = import("core/ui")
+    local createWindow = import("core/ui")(import)
+    local i18n = import("core/i18n")
 
     local window = createWindow({
         Subtitle = "My Anime Mine · Mining Hub",
@@ -19,10 +20,11 @@ return function(import)
     end)
 
     local settingsTab = window:AddTab("ตั้งค่า", "⚙")
-    settingsTab:AddSlider("ขนาดเมนู", "ย่อขยายเมนูทั้งชุด", 50, 100, 70, function(value)
-        print("Menu scale:", value)
+    settingsTab:AddSlider("ขนาดเมนู", "ย่อขยายเมนูทั้งชุด", 50, 150, 100, function(value)
+        window:SetScale(value)
     end)
     settingsTab:AddSegmented({ "ตามเครื่อง", "อังกฤษ", "ไทย" }, 1, function(index, value)
-        print("Language:", value)
+        local code = ({ "auto", "en", "th" })[index]
+        i18n.SetLanguage(code)
     end)
 end
