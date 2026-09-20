@@ -1,6 +1,7 @@
 return function(import)
     local createWindow = import("core/ui")(import)
     local i18n = import("core/i18n")
+    local antiAfk = import("core/anti_afk")
 
     local window = createWindow({
         Subtitle = "My Anime Mine · Mining Hub",
@@ -20,6 +21,9 @@ return function(import)
     end)
 
     local settingsTab = window:AddTab("ตั้งค่า", "⚙")
+    settingsTab:AddCard("Anti-AFK", "ป้องกันถูกเตะออกจากห้องเวลาไม่ได้ขยับตัว"):AddToggle(false, function(state)
+        antiAfk.SetEnabled(state)
+    end)
     settingsTab:AddSlider("ขนาดเมนู", "ย่อขยายเมนูทั้งชุด", 50, 150, 100, function(value)
         window:SetScale(value)
     end)
