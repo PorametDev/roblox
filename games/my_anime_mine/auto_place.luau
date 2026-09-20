@@ -59,6 +59,37 @@ local function readPlacedPower(holder)
     return nil
 end
 
+-- A slot you haven't bought yet floats its price ("$14.4B") and still
+-- accepts E - pressing it just gets "Not enough cash - the next miner slot
+-- costs $14.4B". Enabled stays true on those, so the price tag is what
+-- tells them apart from a slot that's genuinely ready for a miner.
+local function findPriceTag(holder)
+    for _, descendant in ipairs(holder:GetDescendants()) do
+        if descendant:IsA("TextLabel") and descendant.Text:match("^%$") then
+            return descendant.Text
+        end
+    end
+    return nil
+end
+
+local function isLocked(prompt, holder)
+    if not prompt.Enabled then
+        return true, "prompt disabled"
+    end
+
+    local price = findPriceTag(holder)
+    if price then
+        return true, "costs " .. price
+    end
+
+    local action = prompt.ActionText or ""
+    if action:match("[Uu]nlock") or action:match("[Bb]uy") or action:match("%$") then
+        return true, "action '" .. action .. "'"
+    end
+
+    return false
+end
+
 local function distanceTo(part)
     local character = Players.LocalPlayer.Character
     local hrp = character and character:FindFirstChild("HumanoidRootPart")
@@ -83,6 +114,8 @@ local function firePrompt(prompt)
     return ok
 end
 
+local lastSurvey = nil
+
 -- Surveys every holder once: which are free to fill, and which are holding
 -- something weak enough to be worth swapping out.
 local function surveyHolders()
@@ -93,23 +126,36 @@ local function surveyHolders()
     end
 
     local empty, occupied = {}, {}
+    local summary = {}
 
     for _, holder in ipairs(parts.Holders:GetChildren()) do
         local prompt = findHolderPrompt(holder)
-        -- A locked slot still reads "Empty miner slot" but has its prompt
-        -- disabled, and Auto Place used to hammer it forever.
-        if prompt and prompt.Enabled then
-            if isEmpty(prompt) then
+        if prompt then
+            local locked, why = isLocked(prompt, holder)
+            if locked then
+                table.insert(summary, holder.Name .. "=locked(" .. why .. ")")
+            elseif isEmpty(prompt) then
+                table.insert(summary, holder.Name .. "=empty")
                 table.insert(empty, { holder = holder, prompt = prompt })
             else
+                local power = readPlacedPower(holder) or 0
+                table.insert(summary, holder.Name .. "=" .. prompt.ObjectText .. "(" .. power .. ")")
                 table.insert(occupied, {
                     holder = holder,
                     prompt = prompt,
                     name = prompt.ObjectText,
-                    power = readPlacedPower(holder) or 0,
+                    power = power,
                 })
             end
         end
+    end
+
+    -- One line describing the whole plot, only when it changes, so the log
+    -- shows what Auto Place believes about every slot without spamming.
+    local line = table.concat(summary, " | ")
+    if line ~= lastSurvey then
+        log("[AutoPlace] holders: " .. line)
+        lastSurvey = line
     end
 
     table.sort(occupied, function(a, b)
