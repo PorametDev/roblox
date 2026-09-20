@@ -231,6 +231,23 @@ function UI:AddTab(name, icon, opts)
         local cardApi = {}
         cardApi.Frame = card
 
+        function cardApi:SetSubtitle(text)
+            if not subtitleLbl then
+                subtitleLbl = Instance.new("TextLabel")
+                subtitleLbl.Size = UDim2.new(1, -80, 0, 0)
+                subtitleLbl.AutomaticSize = Enum.AutomaticSize.Y
+                subtitleLbl.Position = UDim2.new(0, 0, 0, 20)
+                subtitleLbl.BackgroundTransparency = 1
+                subtitleLbl.Font = Enum.Font.Gotham
+                subtitleLbl.TextSize = 12
+                subtitleLbl.TextWrapped = true
+                subtitleLbl.TextColor3 = THEME.SubText
+                subtitleLbl.TextXAlignment = Enum.TextXAlignment.Left
+                subtitleLbl.Parent = card
+            end
+            subtitleLbl.Text = text
+        end
+
         function cardApi:SetValue(text)
             local valueLbl = card:FindFirstChild("ValueLabel")
             if not valueLbl then

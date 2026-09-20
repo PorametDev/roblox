@@ -40,11 +40,12 @@ return function(import)
         ))
     end)
 
-    local dumpBtn
-    dumpBtn = farmTab:AddCard(
+    local dumpCard = farmTab:AddCard(
         "Debug: Dump Node/Holder",
         "กดเพื่อบันทึกโครงสร้างข้างใน Node แรกกับ Holder แรกลง MekPro.log"
-    ):AddButton("Dump", function()
+    )
+    local dumpBtn
+    dumpBtn = dumpCard:AddButton("Dump", function()
         local plot = getCurrentPlot()
         if not plot then
             dumpBtn.Text = "no plot"
@@ -54,7 +55,7 @@ return function(import)
         local ok, err = log("[MyAnimeMine] === Dump start ===")
         if not ok then
             dumpBtn.Text = "log failed"
-            log("[MyAnimeMine] logging error: " .. tostring(err))
+            dumpCard:SetSubtitle("Error: " .. tostring(err))
             return
         end
 
