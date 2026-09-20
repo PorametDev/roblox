@@ -20,6 +20,11 @@ local function dumpInstance(instance, log, indent)
         end
 
         log(line)
+
+        for attrName, attrValue in pairs(child:GetAttributes()) do
+            log(indent .. "  [attr] " .. attrName .. " = " .. tostring(attrValue))
+        end
+
         dumpInstance(child, log, indent .. "  ")
     end
 end

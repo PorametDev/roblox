@@ -1,4 +1,5 @@
 return function(import)
+    local Players = game:GetService("Players")
     local createWindow = import("core/ui")(import)
     local i18n = import("core/i18n")
     local antiAfk = import("core/anti_afk")(import)
@@ -93,6 +94,28 @@ return function(import)
         end
 
         dumpBtn.Text = "Done"
+    end)
+
+    local toolDumpCard = farmTab:AddCard(
+        "Debug: Dump Backpack Tool",
+        "กดเพื่อบันทึก attribute/โครงสร้างของ miner ตัวแรกใน Backpack ลง MekPro.log"
+    )
+    local toolDumpBtn
+    toolDumpBtn = toolDumpCard:AddButton("Dump", function()
+        local backpack = Players.LocalPlayer:FindFirstChild("Backpack")
+        local tool = backpack and backpack:FindFirstChildWhichIsA("Tool")
+        if not tool then
+            toolDumpBtn.Text = "no tool"
+            return
+        end
+
+        log("[MyAnimeMine] === Tool: " .. tool.Name .. " ===")
+        for attrName, attrValue in pairs(tool:GetAttributes()) do
+            log("  [attr] " .. attrName .. " = " .. tostring(attrValue))
+        end
+        dumpInstance(tool, log)
+
+        toolDumpBtn.Text = "Done"
     end)
 
     local settingsTab = window:AddTab("ตั้งค่า", "⚙")
