@@ -420,8 +420,31 @@ function api.UnlockedZones()
     return list
 end
 
--- Every node the tree can show for a zone, annotated with the three things
--- that decide whether buying it will work.
+-- Team power: the tree's third gate, and the one nothing else hints at.
+-- Past the parents-are-done check and the price, MineSkillTreeClient also
+-- greys the Buy button out with "Needs X team power (you have Y)" when
+--
+--   MineConfig.GetSkillPowerReq(zone, family, nextLevel) > MinePower
+--
+-- MinePower is an attribute on the local player, kept up to date by the
+-- server. The plot's own level - the NodeLevel family, which is what makes
+-- rocks tougher and ore worth more - is gated this way, so a research pass
+-- that ignored it would keep firing at a node the server always refuses.
+function api.MinePower()
+    local player = game:GetService("Players").LocalPlayer
+    return tonumber(player and player:GetAttribute("MinePower")) or 0
+end
+
+local function skillPowerReq(zoneKey, family, nextLevel)
+    if type(mineConfig.GetSkillPowerReq) ~= "function" then
+        return nil
+    end
+    local ok, req = pcall(mineConfig.GetSkillPowerReq, zoneKey, family, nextLevel)
+    return ok and tonumber(req) or nil
+end
+
+-- Every node the tree can show for a zone, annotated with everything that
+-- decides whether buying it will work.
 function api.SkillNodes(zoneKey)
     if not modules() then
         return {}
@@ -429,6 +452,7 @@ function api.SkillNodes(zoneKey)
 
     local mine = api.GetMineData()
     local skills = (mine and mine.Skills and mine.Skills[zoneKey]) or {}
+    local power = api.MinePower()
     local list = {}
 
     pcall(function()
@@ -440,6 +464,8 @@ function api.SkillNodes(zoneKey)
                 cost = tonumber(mineConfig.GetSkillCost(zoneKey, level, node.Family))
             end
 
+            local powerReq = skillPowerReq(zoneKey, node.Family, level + 1)
+
             table.insert(list, {
                 zoneKey = zoneKey,
                 id = node.Id,
@@ -449,6 +475,9 @@ function api.SkillNodes(zoneKey)
                 level = level,
                 max = max,
                 cost = cost,
+                powerReq = powerReq,
+                power = power,
+                powerOk = (powerReq == nil) or (power >= powerReq),
                 maxed = mineConfig.IsSkillNodeMaxed(skills, node) and true or false,
                 open = mineConfig.IsSkillNodeOpen(skills, node) and true or false,
             })
@@ -456,6 +485,22 @@ function api.SkillNodes(zoneKey)
     end)
 
     return list
+end
+
+-- The plot's own level for a zone, straight from the same helper the tree
+-- uses to describe it.
+function api.NodeLevel(zoneKey)
+    if not modules() then
+        return nil
+    end
+
+    local mine = api.GetMineData()
+    if not mine then
+        return nil
+    end
+
+    local ok, level = pcall(mineConfig.GetNodeLevel, mine.Skills, zoneKey)
+    return ok and tonumber(level) or nil
 end
 
 -- The Core tab is a separate tree with a separate remote per upgrade -

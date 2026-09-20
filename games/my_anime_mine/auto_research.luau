@@ -19,6 +19,14 @@
 --
 -- Costs are real now (GetSkillCost / CoreUpgradeById.Cost), so an unaffordable
 -- node is skipped rather than fired at and silently dropped.
+--
+-- And there is a THIRD gate past "open" and "affordable": team power.
+-- MineSkillTreeClient greys the button out with "Needs X team power (you
+-- have Y)" when GetSkillPowerReq(zone, family, nextLevel) is above the
+-- player's MinePower attribute. The plot's own level - the NodeLevel
+-- family, which makes rocks tougher and ore worth more - is gated exactly
+-- this way, so ignoring it meant firing at a node the server always
+-- refuses and burning a slot out of maxPerPass doing it.
 return function(import)
 
 local gameApi = import("games/my_anime_mine/game_api")(import)
@@ -88,16 +96,24 @@ end
 local function buyableZoneNodes()
     local budget = spendable()
     local list = {}
+    local powerBlocked = nil
 
     for _, zoneKey in ipairs(gameApi.UnlockedZones()) do
         for _, node in ipairs(gameApi.SkillNodes(zoneKey)) do
             if node.open and not node.maxed and node.cost and node.cost <= budget then
-                table.insert(list, node)
+                if node.powerOk then
+                    table.insert(list, node)
+                elseif not powerBlocked or node.powerReq < powerBlocked.powerReq then
+                    -- Remember the cheapest power requirement we're short
+                    -- of, so the log can say how far off we are rather than
+                    -- going quiet.
+                    powerBlocked = node
+                end
             end
         end
     end
 
-    return list
+    return list, powerBlocked
 end
 
 local function buyableCoreNodes()
@@ -153,8 +169,11 @@ local function runJob()
     local bought = 0
     local blocked = 0
 
+    local powerBlocked = nil
+
     if buyZones then
-        local nodes = buyableZoneNodes()
+        local nodes
+        nodes, powerBlocked = buyableZoneNodes()
         sortNodes(nodes)
 
         for _, node in ipairs(nodes) do
@@ -206,6 +225,12 @@ local function runJob()
         if blocked > 0 then
             log("[AutoResearch] " .. blocked
                 .. " node(s) looked buyable but the server refused")
+        elseif powerBlocked then
+            log("[AutoResearch] " .. powerBlocked.zoneKey .. " " .. powerBlocked.id
+                .. " (" .. powerBlocked.family .. ") needs "
+                .. math.floor(powerBlocked.powerReq) .. " team power, you have "
+                .. math.floor(powerBlocked.power)
+                .. " - upgrade the miners first")
         else
             log("[AutoResearch] nothing open and affordable right now")
         end
@@ -217,8 +242,11 @@ end
 -- Cheap enough to run before committing a turn: it's all table reads off
 -- state the client already holds.
 function autoResearch.HasWork()
-    if buyZones and #buyableZoneNodes() > 0 then
-        return true
+    if buyZones then
+        local nodes = buyableZoneNodes()
+        if #nodes > 0 then
+            return true
+        end
     end
     return buyCore and #buyableCoreNodes() > 0
 end
