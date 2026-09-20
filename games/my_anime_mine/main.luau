@@ -4,6 +4,7 @@ return function(import)
     local i18n = import("core/i18n")
     local antiAfk = import("core/anti_afk")(import)
     local interactionLogger = import("core/interaction_logger")(import)
+    local scheduler = import("core/turn_scheduler")(import)
     local log = import("core/logger")
 
     local window = createWindow({
@@ -21,6 +22,18 @@ return function(import)
     local autoChest = import("games/my_anime_mine/auto_chest")(import)
     local autoSell = import("games/my_anime_mine/auto_sell")(import)
     local autoUpgrade = import("games/my_anime_mine/auto_upgrade")(import)
+
+    -- Each auto_* module only exposes Step()/SetEnabled()/IsEnabled() now -
+    -- the scheduler is the only thing with a Heartbeat connection, so
+    -- enabled autos take turns instead of all firing every frame and
+    -- fighting over the character (e.g. Auto Sell teleporting away while
+    -- Auto Mine/Auto Chest are still acting on the plot).
+    scheduler.Register("AutoMine", autoMine.Step, autoMine.IsEnabled)
+    scheduler.Register("AutoPlace", autoPlace.Step, autoPlace.IsEnabled)
+    scheduler.Register("AutoChest", autoChest.Step, autoChest.IsEnabled)
+    scheduler.Register("AutoSell", autoSell.Step, autoSell.IsEnabled)
+    scheduler.Register("AutoUpgrade", autoUpgrade.Step, autoUpgrade.IsEnabled)
+    scheduler.Start()
 
     local farmTab = window:AddTab("ฟาร์ม", "🏠")
 
@@ -198,6 +211,7 @@ return function(import)
     -- previous run) leaves these background loops running forever,
     -- invisible and no longer controllable from any toggle.
     window:OnDestroy(function()
+        scheduler.Stop()
         autoMine.SetEnabled(false)
         autoPlace.SetEnabled(false)
         autoChest.SetEnabled(false)

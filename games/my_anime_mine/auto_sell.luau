@@ -5,15 +5,21 @@
 -- SellStand before opening it, and teleport back to where we started once
 -- the sale completes. We also move SellFrame off-screen while it's open
 -- (instead of touching .Visible, which the game's own scripts key off of)
--- so the popup doesn't flash on screen during automation.
+-- so the popup doesn't flash on screen during automation. Only actually
+-- opens/sells once there's at least one Card in the sell scroll, so we're
+-- not teleporting back and forth with nothing to sell - per user request.
+-- No longer owns its own Heartbeat connection - core/turn_scheduler calls
+-- Step() only when it's this task's turn, so multiple autos never fire in
+-- the same frame and fight over the character (e.g. teleporting to the
+-- SellStand while Auto Mine/Auto Chest are still acting on the plot).
 return function(import)
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-local RunService = game:GetService("RunService")
 local log = import("core/logger")
 
 local FIRE_INTERVAL = 0.5
+local RECHECK_COOLDOWN = 5
 local HIDDEN_POSITION = UDim2.new(3, 0, 3, 0)
 
 local function getSellFrame()
@@ -26,6 +32,21 @@ local function labelText(button)
     local content = button:FindFirstChild("Content")
     local label = content and content:FindFirstChild("Label")
     return label and label.Text or ""
+end
+
+local function countCards(sellFrame)
+    local content = sellFrame:FindFirstChild("Content")
+    local scroll = content and content:FindFirstChild("Scroll")
+    if not scroll then
+        return 0
+    end
+    local count = 0
+    for _, child in ipairs(scroll:GetChildren()) do
+        if child.Name == "Card" then
+            count = count + 1
+        end
+    end
+    return count
 end
 
 local function clickButton(button)
@@ -56,97 +77,114 @@ local function teleportTo(part)
 end
 
 local autoSell = {}
-local connection = nil
+local enabled = false
+local lastFire = 0
+local lastVisibleState = nil
+local nextOpenCheck = 0
+local returnCFrame = nil
 
-function autoSell.SetEnabled(enabled)
-    if enabled == autoSell.IsEnabled() then
+local function returnHome()
+    local character = Players.LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if hrp and returnCFrame then
+        hrp.CFrame = returnCFrame
+    end
+    returnCFrame = nil
+end
+
+function autoSell.SetEnabled(state)
+    if state == enabled then
         return
     end
+    enabled = state
 
     if not enabled then
-        connection:Disconnect()
-        connection = nil
         local sellFrame = getSellFrame()
         if sellFrame then
             sellFrame.Position = sellFrame:GetAttribute("MekProOriginalPosition") or sellFrame.Position
         end
+        returnHome()
         log("[AutoSell] disabled")
-        return
+    else
+        nextOpenCheck = 0
+        log("[AutoSell] enabled (only sells when there's something in the scroll)")
     end
-
-    log("[AutoSell] enabled")
-    local lastFire = 0
-    local lastVisibleState = nil
-    local returnCFrame = nil
-
-    connection = RunService.Heartbeat:Connect(function()
-        local now = tick()
-        if now - lastFire < FIRE_INTERVAL then
-            return
-        end
-        lastFire = now
-
-        local sellFrame = getSellFrame()
-        local visible = sellFrame ~= nil and sellFrame.Visible
-
-        if visible ~= lastVisibleState then
-            log("[AutoSell] SellFrame.Visible = " .. tostring(visible))
-            lastVisibleState = visible
-
-            if visible and sellFrame:GetAttribute("MekProOriginalPosition") == nil then
-                sellFrame:SetAttribute("MekProOriginalPosition", sellFrame.Position)
-            end
-
-            if not visible and returnCFrame then
-                local character = Players.LocalPlayer.Character
-                local hrp = character and character:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    hrp.CFrame = returnCFrame
-                end
-                returnCFrame = nil
-            end
-        end
-
-        if visible then
-            sellFrame.Position = HIDDEN_POSITION
-
-            local content = sellFrame:FindFirstChild("Content")
-            local selectAllButton = content and content:FindFirstChild("SelectAllButton")
-            local sellButton = content and content:FindFirstChild("SellButton")
-
-            if selectAllButton and labelText(selectAllButton) == "Select All" then
-                clickButton(selectAllButton)
-                log("[AutoSell] clicked SelectAllButton")
-            elseif sellButton and labelText(sellButton):find("Sell for", 1, true) then
-                clickButton(sellButton)
-                log("[AutoSell] clicked SellButton")
-            end
-        else
-            local prompt, promptPart = getSellStandPromptPart()
-            if prompt and promptPart then
-                if not returnCFrame then
-                    local character = Players.LocalPlayer.Character
-                    local hrp = character and character:FindFirstChild("HumanoidRootPart")
-                    if hrp then
-                        returnCFrame = hrp.CFrame
-                    end
-                end
-
-                teleportTo(promptPart)
-
-                local ok, err = pcall(function()
-                    fireproximityprompt(prompt, Enum.ProximityPromptInputType.Keyboard, prompt.HoldDuration)
-                end)
-                if not ok then
-                    log("[AutoSell] fireproximityprompt error: " .. tostring(err))
-                end
-            end
-        end
-    end)
 end
 
 function autoSell.IsEnabled()
-    return connection ~= nil
+    return enabled
+end
+
+function autoSell.Step()
+    if not enabled then
+        return
+    end
+
+    local now = tick()
+    if now - lastFire < FIRE_INTERVAL then
+        return
+    end
+    lastFire = now
+
+    local sellFrame = getSellFrame()
+    local visible = sellFrame ~= nil and sellFrame.Visible
+
+    if visible ~= lastVisibleState then
+        log("[AutoSell] SellFrame.Visible = " .. tostring(visible))
+        lastVisibleState = visible
+
+        if visible and sellFrame:GetAttribute("MekProOriginalPosition") == nil then
+            sellFrame:SetAttribute("MekProOriginalPosition", sellFrame.Position)
+        end
+    end
+
+    if visible then
+        sellFrame.Position = HIDDEN_POSITION
+
+        local cardCount = countCards(sellFrame)
+        if cardCount == 0 then
+            log("[AutoSell] nothing to sell, closing")
+            local closeButton = sellFrame:FindFirstChild("Close")
+            if closeButton then
+                clickButton(closeButton)
+            end
+            returnHome()
+            nextOpenCheck = now + RECHECK_COOLDOWN
+            return
+        end
+
+        local content = sellFrame:FindFirstChild("Content")
+        local selectAllButton = content and content:FindFirstChild("SelectAllButton")
+        local sellButton = content and content:FindFirstChild("SellButton")
+
+        if selectAllButton and labelText(selectAllButton) == "Select All" then
+            clickButton(selectAllButton)
+            log("[AutoSell] clicked SelectAllButton (" .. cardCount .. " cards)")
+        elseif sellButton and labelText(sellButton):find("Sell for", 1, true) then
+            clickButton(sellButton)
+            log("[AutoSell] clicked SellButton")
+        end
+    elseif now >= nextOpenCheck then
+        local prompt, promptPart = getSellStandPromptPart()
+        if prompt and promptPart then
+            if not returnCFrame then
+                local character = Players.LocalPlayer.Character
+                local hrp = character and character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    returnCFrame = hrp.CFrame
+                end
+            end
+
+            teleportTo(promptPart)
+
+            local ok, err = pcall(function()
+                fireproximityprompt(prompt, Enum.ProximityPromptInputType.Keyboard, prompt.HoldDuration)
+            end)
+            if not ok then
+                log("[AutoSell] fireproximityprompt error: " .. tostring(err))
+            end
+        end
+    end
 end
 
 return autoSell

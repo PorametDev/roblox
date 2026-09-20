@@ -1,8 +1,9 @@
 -- UpgradeClick fired fine manually despite MaxActivationDistance=0
 -- (confirmed via Interaction Logger), same as NodeClick for mining.
+-- No longer owns its own Heartbeat connection - core/turn_scheduler calls
+-- Step() only when it's this task's turn.
 return function(import)
 
-local RunService = game:GetService("RunService")
 local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
 local getPlotParts = import("games/my_anime_mine/get_plot_parts")
 local log = import("core/logger")
@@ -15,51 +16,48 @@ local function findUpgradeClickDetector(holder)
 end
 
 local autoUpgrade = {}
-local connection = nil
+local enabled = false
+local lastFire = 0
 
-function autoUpgrade.SetEnabled(enabled)
-    if enabled == autoUpgrade.IsEnabled() then
+function autoUpgrade.SetEnabled(state)
+    if state == enabled then
         return
     end
-
-    if not enabled then
-        connection:Disconnect()
-        connection = nil
-        log("[AutoUpgrade] disabled")
-        return
-    end
-
-    log("[AutoUpgrade] enabled")
-    local lastFire = 0
-
-    connection = RunService.Heartbeat:Connect(function()
-        local now = tick()
-        if now - lastFire < FIRE_INTERVAL then
-            return
-        end
-        lastFire = now
-
-        local plot = getCurrentPlot()
-        if not plot then
-            return
-        end
-
-        local parts = getPlotParts(plot)
-        if not parts.Holders then
-            return
-        end
-
-        for _, holder in ipairs(parts.Holders:GetChildren()) do
-            local detector = findUpgradeClickDetector(holder)
-            if detector then
-                fireclickdetector(detector)
-            end
-        end
-    end)
+    enabled = state
+    log("[AutoUpgrade] " .. (enabled and "enabled" or "disabled"))
 end
 
 function autoUpgrade.IsEnabled()
-    return connection ~= nil
+    return enabled
+end
+
+function autoUpgrade.Step()
+    if not enabled then
+        return
+    end
+
+    local now = tick()
+    if now - lastFire < FIRE_INTERVAL then
+        return
+    end
+    lastFire = now
+
+    local plot = getCurrentPlot()
+    if not plot then
+        return
+    end
+
+    local parts = getPlotParts(plot)
+    if not parts.Holders then
+        return
+    end
+
+    for _, holder in ipairs(parts.Holders:GetChildren()) do
+        local detector = findUpgradeClickDetector(holder)
+        if detector then
+            fireclickdetector(detector)
+        end
+    end
 end
 
 return autoUpgrade
