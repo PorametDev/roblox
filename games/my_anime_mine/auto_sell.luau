@@ -4,7 +4,7 @@
 -- one job instead of repeatedly re-clicking every tick while the frame
 -- stays open (that's what caused the SelectAllButton loop before).
 -- Registered with core/scheduler as EXCLUSIVE: a new job only starts every
--- CHECK_INTERVAL, and while `busy` is true no other exclusive task runs -
+-- checkInterval, and while `busy` is true no other exclusive task runs -
 -- this one's teleport home used to land right on Auto Chest's Take All.
 --
 -- Note: whether there's anything to sell can only be read from the cards
@@ -28,12 +28,12 @@ local log = import("core/logger")
 -- this one does have to open the menu to find out. Keep that rare: ore
 -- piles up slowly and a sale every 45s is plenty, whereas every 3s meant
 -- teleporting the player off their plot constantly.
-local CHECK_INTERVAL = 45
+local checkInterval = 45
 -- Once everything sellable is gone, the leftovers (equipped units and the
 -- like) can't be selected at all, so Select All does nothing and the Sell
 -- label never shows a price. That's a normal state, not a failure - back
 -- off properly instead of retrying every few seconds.
-local NOTHING_SELLABLE_COOLDOWN = 60
+local nothingSellableCooldown = 60
 
 local function getSellFrame()
     local playerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
@@ -142,6 +142,10 @@ function autoSell.IsEnabled()
     return enabled
 end
 
+function autoSell.SetCheckInterval(seconds)
+    checkInterval = math.max(seconds, 5)
+end
+
 -- The scheduler holds everyone else off while a job is mid-flight - Auto
 -- Sell's teleport home used to land right on top of Auto Chest's Take All.
 function autoSell.IsBusy()
@@ -236,13 +240,13 @@ local function runJob()
         clickButton(sellButton)
         log("[AutoSell] clicked SellButton")
     else
-        lastAttempt = tick() + NOTHING_SELLABLE_COOLDOWN - CHECK_INTERVAL
+        lastAttempt = tick() + nothingSellableCooldown - checkInterval
         local closeButton = sellFrame:FindFirstChild("Close")
         if closeButton then
             clickButton(closeButton)
         end
         log("[AutoSell] nothing selectable (" .. cardCount .. " cards left, label = '"
-            .. tostring(sawLabel) .. "'), backing off " .. NOTHING_SELLABLE_COOLDOWN .. "s")
+            .. tostring(sawLabel) .. "'), backing off " .. nothingSellableCooldown .. "s")
     end
 
     task.wait(0.5)
@@ -256,7 +260,7 @@ function autoSell.Step()
     end
 
     local now = tick()
-    if now - lastAttempt < CHECK_INTERVAL then
+    if now - lastAttempt < checkInterval then
         return
     end
     lastAttempt = now

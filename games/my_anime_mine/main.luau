@@ -27,6 +27,18 @@ return function(import)
         end
     end
 
+    -- Same idea for the numeric settings: load, apply, and save on change,
+    -- so every automation's tunables live in the menu rather than in the
+    -- source.
+    local function persistentSlider(tab, title, subtitle, min, max, key, default, apply, suffix)
+        local saved = config.Get(key, default)
+        tab:AddSlider(title, subtitle, min, max, saved, function(value)
+            config.Set(key, value)
+            apply(value)
+        end, suffix)
+        apply(saved)
+    end
+
     local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
     local getPlotParts = import("games/my_anime_mine/get_plot_parts")
     local dumpInstance = import("games/my_anime_mine/debug_dump")
@@ -69,53 +81,56 @@ return function(import)
     -- Total click traffic is nodes x clicks x speed per second, so these two
     -- multiply each other - worth turning up deliberately rather than
     -- maxing both.
-    local savedMineSpeed = config.Get("autoMineSpeed", 5)
-    farmTab:AddSlider(
-        "Auto Mine: ความเร็ว",
-        "จำนวนรอบต่อวินาที (ยิ่งสูงยิ่งถี่)",
-        1, 30, savedMineSpeed,
-        function(value)
-            config.Set("autoMineSpeed", value)
-            autoMine.SetCyclesPerSecond(value)
-        end,
-        "/s"
-    )
-    autoMine.SetCyclesPerSecond(savedMineSpeed)
-
-    local savedMineClicks = config.Get("autoMineClicks", 1)
-    farmTab:AddSlider(
-        "Auto Mine: คลิกต่อรอบ",
-        "ยิงซ้ำกี่ครั้งต่อ Node ในแต่ละรอบ",
-        1, 10, savedMineClicks,
-        function(value)
-            config.Set("autoMineClicks", value)
-            autoMine.SetClicksPerCycle(value)
-        end,
-        "x"
-    )
-    autoMine.SetClicksPerCycle(savedMineClicks)
+    persistentSlider(farmTab, "Auto Mine: ความเร็ว", "จำนวนรอบต่อวินาที (ยิ่งสูงยิ่งถี่)",
+        1, 30, "autoMineSpeed", 5, autoMine.SetCyclesPerSecond, "/s")
+    persistentSlider(farmTab, "Auto Mine: คลิกต่อรอบ", "ยิงซ้ำกี่ครั้งต่อ Node ในแต่ละรอบ",
+        1, 10, "autoMineClicks", 1, autoMine.SetClicksPerCycle, "x")
 
     persistentToggle(farmTab:AddCard(
         "Auto Place Miner",
         "เลือก miner ที่พลังสูงสุดจาก Backpack ไปวางลง Holder ที่ว่างอัตโนมัติ"
     ), "autoPlace", autoPlace.SetEnabled)
+    persistentSlider(farmTab, "Auto Place: รอบเช็ค", "เช็คช่องว่าง/ตัวที่ควรเปลี่ยนทุกกี่วินาที",
+        1, 60, "autoPlaceInterval", 3, autoPlace.SetCheckInterval, "s")
 
     persistentToggle(farmTab:AddCard(
         "Auto Chest",
         "เช็คจำนวนของจากป้ายบน chest เงียบๆ ถึงเกณฑ์แล้วค่อยไปเก็บ (ไม่รบกวนตอนยังไม่ถึง)"
     ), "autoChest", autoChest.SetEnabled)
+    persistentSlider(farmTab, "Auto Chest: เกณฑ์เก็บ", "เก็บเมื่อของใน chest ถึงกี่ชิ้น",
+        50, 3000, "autoChestMinItems", 100, autoChest.SetMinItems, " ชิ้น")
+    persistentSlider(farmTab, "Auto Chest: รอบเช็ค", "อ่านป้ายบน chest ทุกกี่วินาที",
+        1, 60, "autoChestInterval", 3, autoChest.SetCheckInterval, "s")
 
     persistentToggle(farmTab:AddCard(
         "Auto Sell",
         "ไปที่ SellStand แล้วกด Select All + Sell อัตโนมัติทุก 45 วินาที"
     ), "autoSell", autoSell.SetEnabled)
+    persistentSlider(farmTab, "Auto Sell: รอบขาย", "ไปขายทุกกี่วินาที (ต้องเปิดเมนูทุกครั้ง)",
+        10, 300, "autoSellInterval", 45, autoSell.SetCheckInterval, "s")
 
     persistentToggle(farmTab:AddCard(
         "Auto Upgrade",
         "กด UpgradeClick ทุก Holder อัตโนมัติเมื่อมีเงินพอ"
     ), "autoUpgrade", autoUpgrade.SetEnabled)
+    persistentSlider(farmTab, "Auto Upgrade: รอบกด", "กด UpgradeClick ทุกกี่วินาที",
+        1, 30, "autoUpgradeInterval", 1, autoUpgrade.SetInterval, "s")
 
-    local debugCard = farmTab:AddCard("Debug: Current Plot", "กดเพื่อเช็ค plot ปัจจุบัน (ผลขึ้นตรงบนปุ่มเอง ไม่ต้องพึ่ง console)")
+    -- Everything below lives in its own tab so shipping a release is just
+    -- deleting this block - no debug controls tangled up with the real
+    -- ones.
+    local debugTab = window:AddTab("ดีบัก", "🐛")
+
+    persistentToggle(
+        debugTab:AddCard(
+            "Interaction Logger",
+            "เปิดแล้วไปกด/แตะอะไรก็ได้ในเกม ทุก prompt/click/ปุ่มจะถูกบันทึกลง MekPro.log"
+        ),
+        "interactionLogger",
+        interactionLogger.SetEnabled
+    )
+
+    local debugCard = debugTab:AddCard("Debug: Current Plot", "กดเพื่อเช็ค plot ปัจจุบัน (ผลขึ้นตรงบนปุ่มเอง ไม่ต้องพึ่ง console)")
     -- Forward-declared: the callback below closes over `checkBtn`, but a
     -- `local checkBtn = AddButton(..., function() checkBtn... end)` in one
     -- statement would have the closure see the OUTER (nil) checkBtn - the
@@ -140,7 +155,7 @@ return function(import)
         ))
     end)
 
-    local dumpCard = farmTab:AddCard(
+    local dumpCard = debugTab:AddCard(
         "Debug: Dump Node/Holder",
         "กดเพื่อบันทึกโครงสร้างข้างใน Node แรกกับ Holder แรกลง MekPro.log"
     )
@@ -180,7 +195,7 @@ return function(import)
         dumpBtn.Text = "Done"
     end)
 
-    local toolDumpCard = farmTab:AddCard(
+    local toolDumpCard = debugTab:AddCard(
         "Debug: Dump Backpack Tool",
         "กดเพื่อบันทึก attribute/โครงสร้างของ miner ตัวแรกใน Backpack ลง MekPro.log"
     )
@@ -202,7 +217,7 @@ return function(import)
         toolDumpBtn.Text = "Done"
     end)
 
-    local remoteDumpCard = farmTab:AddCard(
+    local remoteDumpCard = debugTab:AddCard(
         "Debug: Dump All Remotes",
         "กดเพื่อบันทึกรายชื่อ RemoteEvent/RemoteFunction ทั้งหมดใน ReplicatedStorage ลง MekPro.log"
     )
@@ -212,7 +227,7 @@ return function(import)
         remoteDumpBtn.Text = count .. " remotes"
     end)
 
-    local sellCardsDumpCard = farmTab:AddCard(
+    local sellCardsDumpCard = debugTab:AddCard(
         "Debug: Dump Sell Cards",
         "เปิดหน้าขายของ (SellStand) ก่อน แล้วกดปุ่มนี้เพื่อดูว่าแต่ละ Card ระบุไอเทมด้วยอะไร"
     )
@@ -222,7 +237,7 @@ return function(import)
         sellCardsDumpBtn.Text = count .. " cards"
     end)
 
-    local guiDumpCard = farmTab:AddCard(
+    local guiDumpCard = debugTab:AddCard(
         "Debug: Dump Visible GUI",
         "เปิดหน้าจอที่อยากดูก่อน (เช่นหน้า Take All ตอนเปิด chest) แล้วกดปุ่มนี้"
     )
@@ -232,7 +247,7 @@ return function(import)
         guiDumpBtn.Text = "Done"
     end)
 
-    local chestDumpCard = farmTab:AddCard(
+    local chestDumpCard = debugTab:AddCard(
         "Debug: Dump Chest Data",
         "หาว่าจำนวนของใน chest ถูกเก็บไว้ที่ไหน จะได้เช็คได้โดยไม่ต้องเปิด UI"
     )
@@ -248,15 +263,6 @@ return function(import)
         settingsTab:AddCard("Anti-AFK", "ป้องกันถูกเตะออกจากห้องเวลาไม่ได้ขยับตัว"),
         "antiAfk",
         antiAfk.SetEnabled
-    )
-
-    persistentToggle(
-        settingsTab:AddCard(
-            "Interaction Logger (debug)",
-            "เปิดแล้วไปกด/แตะอะไรก็ได้ในเกม ทุก prompt/click/ปุ่มจะถูกบันทึกลง MekPro.log"
-        ),
-        "interactionLogger",
-        interactionLogger.SetEnabled
     )
 
     local savedScale = config.Get("menuScale", 100)

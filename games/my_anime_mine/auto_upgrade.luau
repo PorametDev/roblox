@@ -8,7 +8,7 @@ local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
 local getPlotParts = import("games/my_anime_mine/get_plot_parts")
 local log = import("core/logger")
 
-local FIRE_INTERVAL = 1
+local fireInterval = 1
 
 local function findUpgradeClickDetector(holder)
     local upgradePart = holder:FindFirstChild("UpgradePart")
@@ -31,13 +31,17 @@ function autoUpgrade.IsEnabled()
     return enabled
 end
 
+function autoUpgrade.SetInterval(seconds)
+    fireInterval = math.max(seconds, 1)
+end
+
 function autoUpgrade.Step()
     if not enabled then
         return
     end
 
     local now = tick()
-    if now - lastFire < FIRE_INTERVAL then
+    if now - lastFire < fireInterval then
         return
     end
     lastFire = now

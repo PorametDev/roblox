@@ -28,7 +28,7 @@ local teleport = import("core/teleport")
 local click = import("core/click")
 local log = import("core/logger")
 
-local CHECK_INTERVAL = 3
+local checkInterval = 3
 local EMPTY_SLOT_TEXT = "Empty miner slot"
 local LOCKED_SLOT_TEXT = "Locked miner slot"
 local SLOT_KEYS = {
@@ -245,6 +245,10 @@ function autoPlace.IsBusy()
     return busy
 end
 
+function autoPlace.SetCheckInterval(seconds)
+    checkInterval = math.max(seconds, 1)
+end
+
 -- Tells the scheduler whether the plot still needs attention, so Auto Sell
 -- doesn't get a turn until every holder is filled and upgraded.
 function autoPlace.HasWork()
@@ -372,7 +376,7 @@ function autoPlace.Step()
     end
 
     local now = tick()
-    if now - lastAttempt < CHECK_INTERVAL then
+    if now - lastAttempt < checkInterval then
         return
     end
     lastAttempt = now

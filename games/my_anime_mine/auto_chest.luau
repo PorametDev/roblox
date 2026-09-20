@@ -7,7 +7,7 @@
 -- Once the threshold is met the whole collect runs as a single one-shot
 -- job: teleport, open, click Take All, verify the count dropped, teleport
 -- back. Registered with core/scheduler as EXCLUSIVE: a new job only starts
--- every CHECK_INTERVAL, and while `busy` is true no other exclusive task
+-- every checkInterval, and while `busy` is true no other exclusive task
 -- runs, so nothing teleports the character mid-job.
 --
 -- The item count previously never actually went down after clicking
@@ -22,8 +22,9 @@ local teleport = import("core/teleport")
 local click = import("core/click")
 local log = import("core/logger")
 
-local CHECK_INTERVAL = 3
-local MIN_ITEMS_TO_COLLECT = 100
+-- Both adjustable from the menu and remembered in config.
+local checkInterval = 3
+local minItemsToCollect = 100
 
 local function getChestFrame()
     local playerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
@@ -99,12 +100,20 @@ function autoChest.SetEnabled(state)
     else
         lastAttempt = 0
         lastReportedCount = nil
-        log("[AutoChest] enabled (collects once >= " .. MIN_ITEMS_TO_COLLECT .. " items)")
+        log("[AutoChest] enabled (collects once >= " .. minItemsToCollect .. " items)")
     end
 end
 
 function autoChest.IsEnabled()
     return enabled
+end
+
+function autoChest.SetMinItems(value)
+    minItemsToCollect = math.max(value, 1)
+end
+
+function autoChest.SetCheckInterval(seconds)
+    checkInterval = math.max(seconds, 1)
 end
 
 -- The scheduler asks this every frame to decide whose turn it is, so cache
@@ -118,7 +127,7 @@ function autoChest.HasWork()
         cachedCount = getChestCount()
         cachedAt = now
     end
-    return cachedCount ~= nil and cachedCount >= MIN_ITEMS_TO_COLLECT
+    return cachedCount ~= nil and cachedCount >= minItemsToCollect
 end
 
 -- The scheduler holds everyone else off while a job is mid-flight.
@@ -194,7 +203,7 @@ function autoChest.Step()
     end
 
     local now = tick()
-    if now - lastAttempt < CHECK_INTERVAL then
+    if now - lastAttempt < checkInterval then
         return
     end
     lastAttempt = now
@@ -210,9 +219,9 @@ function autoChest.Step()
         return
     end
 
-    if count < MIN_ITEMS_TO_COLLECT then
+    if count < minItemsToCollect then
         if lastReportedCount ~= "waiting" then
-            log("[AutoChest] waiting: " .. count .. "/" .. MIN_ITEMS_TO_COLLECT .. " items")
+            log("[AutoChest] waiting: " .. count .. "/" .. minItemsToCollect .. " items")
             lastReportedCount = "waiting"
         end
         return
