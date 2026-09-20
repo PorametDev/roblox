@@ -14,6 +14,7 @@ return function(import)
     local getPlotParts = import("games/my_anime_mine/get_plot_parts")
     local dumpInstance = import("games/my_anime_mine/debug_dump")
     local dumpRemotes = import("games/my_anime_mine/debug_dump_remotes")(import)
+    local dumpSellCards = import("games/my_anime_mine/debug_dump_sell_cards")(import)
     local autoMine = import("games/my_anime_mine/auto_mine")(import)
     local autoPlace = import("games/my_anime_mine/auto_place")(import)
     local autoChest = import("games/my_anime_mine/auto_chest")(import)
@@ -152,6 +153,16 @@ return function(import)
     remoteDumpBtn = remoteDumpCard:AddButton("Dump", function()
         local count = dumpRemotes()
         remoteDumpBtn.Text = count .. " remotes"
+    end)
+
+    local sellCardsDumpCard = farmTab:AddCard(
+        "Debug: Dump Sell Cards",
+        "เปิดหน้าขายของ (SellStand) ก่อน แล้วกดปุ่มนี้เพื่อดูว่าแต่ละ Card ระบุไอเทมด้วยอะไร"
+    )
+    local sellCardsDumpBtn
+    sellCardsDumpBtn = sellCardsDumpCard:AddButton("Dump", function()
+        local count = dumpSellCards()
+        sellCardsDumpBtn.Text = count .. " cards"
     end)
 
     local settingsTab = window:AddTab("ตั้งค่า", "⚙")
