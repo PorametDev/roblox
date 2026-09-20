@@ -101,7 +101,7 @@ return function(import)
 
     persistentToggle(farmTab:AddCard(
         "Auto Chest",
-        "เช็คจำนวนของจากป้ายบน chest เงียบๆ ถึงเกณฑ์แล้วค่อยไปเก็บ (ไม่รบกวนตอนยังไม่ถึง)"
+        "อ่านจำนวนจาก state ตรงๆ ถึงเกณฑ์แล้วยิง remote เก็บ (ไม่วาป ไม่เปิด UI)"
     ), "autoChest", autoChest.SetEnabled)
     persistentSlider(farmTab, "Auto Chest: เกณฑ์เก็บ", "เก็บเมื่อของใน chest ถึงกี่ชิ้น",
         50, 3000, "autoChestMinItems", 100, autoChest.SetMinItems, " ชิ้น")
@@ -117,21 +117,21 @@ return function(import)
 
     persistentToggle(farmTab:AddCard(
         "Auto Upgrade Unit",
-        "เปิดหน้าอัปเกรดของ miner ที่วางอยู่ แล้วซื้อ Damage/Speed/Mining ที่ราคาไม่เกินงบ"
+        "อัปเกรด Damage/Speed/Mining ของ miner ทุกตัวผ่าน remote ตรง (ไม่เปิด UI)"
     ), "autoUpgrade", autoUpgrade.SetEnabled)
     persistentSlider(farmTab, "Auto Upgrade: รอบเช็ค", "ไล่อัปเกรด miner ทุกกี่วินาที",
         5, 300, "autoUpgradeInterval", 20, autoUpgrade.SetInterval, "s")
-    persistentSlider(farmTab, "Auto Upgrade: งบต่อครั้ง", "ไม่ซื้ออะไรที่แพงกว่านี้",
-        1000, 1000000, "autoUpgradeMaxSpend", 100000, autoUpgrade.SetMaxSpend, "$")
+    persistentSlider(farmTab, "Auto Upgrade: ซื้อสูงสุดต่อรอบ", "กันไม่ให้ใช้เงินหมดในรอบเดียว",
+        1, 20, "autoUpgradeMaxPerPass", 5, autoUpgrade.SetMaxPerPass, "x")
 
     persistentToggle(farmTab:AddCard(
         "Auto Research (Plot)",
-        "เปิดหน้า Upgrades แล้วซื้อ node ที่ปลดได้ในทุกโซน เรียงจากถูกไปแพง"
+        "ซื้อ research ทุก family ในโซนที่ปลดแล้วผ่าน remote ตรง (ไม่เปิด UI)"
     ), "autoResearch", autoResearch.SetEnabled)
     persistentSlider(farmTab, "Auto Research: รอบเช็ค", "เปิดหน้า research ทุกกี่วินาที",
         10, 600, "autoResearchInterval", 30, autoResearch.SetCheckInterval, "s")
-    persistentSlider(farmTab, "Auto Research: งบต่อครั้ง", "ไม่ซื้อ node ที่แพงกว่านี้",
-        1000, 1000000, "autoResearchMaxSpend", 100000, autoResearch.SetMaxSpend, "$")
+    persistentSlider(farmTab, "Auto Research: ซื้อสูงสุดต่อรอบ", "กันไม่ให้ใช้เงินหมดในรอบเดียว",
+        1, 20, "autoResearchMaxPerPass", 5, autoResearch.SetMaxPerPass, "x")
 
     -- Everything below lives in its own tab so shipping a release is just
     -- deleting this block - no debug controls tangled up with the real
