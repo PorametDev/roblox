@@ -289,20 +289,88 @@ end
 
 -- Cheap enough to run before committing a turn: it's all table reads off
 -- state the client already holds.
-function autoResearch.HasWork()
-    local zoneNodes = buyZones and buyableZoneNodes() or {}
-    if #zoneNodes > 0 then
-        return true
+-- Why a pass isn't happening. The diagnostics used to live inside runJob,
+-- which only runs once the scheduler grants a turn - and the scheduler
+-- only grants one when HasWork says yes. So the single case that most
+-- needed explaining, "Auto Research is enabled and never takes a turn",
+-- was the one case that produced no output whatsoever. It has now cost
+-- two wrong guesses.
+local function reportIdle()
+    local money = gameApi.GetMoney()
+    local budget = spendable()
+    local zones = gameApi.UnlockedZones()
+
+    log("[AutoResearch] idle: money=" .. math.floor(money)
+        .. " budget=" .. math.floor(budget)
+        .. " zones=" .. (#zones > 0 and table.concat(zones, ",") or "(none)")
+        .. " buyZones=" .. tostring(buyZones) .. " buyCore=" .. tostring(buyCore))
+
+    for _, zoneKey in ipairs(zones) do
+        local nodes = gameApi.SkillNodes(zoneKey)
+        local pending = 0
+
+        for _, node in ipairs(nodes) do
+            if not node.maxed then
+                pending = pending + 1
+                -- Cap the noise; a few lines is enough to spot the
+                -- condition that's wrongly false.
+                if pending <= 4 then
+                    log("[AutoResearch]   " .. zoneKey .. " " .. tostring(node.id)
+                        .. " (" .. tostring(node.family) .. ") "
+                        .. node.level .. "/" .. node.max
+                        .. " open=" .. tostring(node.open)
+                        .. " cost=" .. tostring(node.cost)
+                        .. " powerOk=" .. tostring(node.powerOk)
+                        .. " req=" .. tostring(node.powerReq)
+                        .. " power=" .. tostring(node.power))
+                end
+            end
+        end
+
+        log("[AutoResearch]   " .. zoneKey .. ": " .. #nodes
+            .. " node(s), " .. pending .. " not maxed")
     end
 
-    if not buyCore then
-        return false
+    local coreNodes = gameApi.CoreNodes()
+    local coreOpen = 0
+    for _, node in ipairs(coreNodes) do
+        if node.open and not node.maxed then
+            coreOpen = coreOpen + 1
+        end
     end
-    if coreLastResort and #zoneNodes > 0 then
-        return false
-    end
-    return #buyableCoreNodes() > 0
+    log("[AutoResearch]   Core: " .. #coreNodes .. " node(s), "
+        .. coreOpen .. " open and unmaxed")
 end
+
+local lastIdleReport = 0
+
+-- Reporting lives here rather than in Step because Step is only reached
+-- once the scheduler grants a turn, and the scheduler only grants one when
+-- this returns true. HasWork is the one thing that still runs while the
+-- task is idle, so it is the only place the idle case can be observed.
+function autoResearch.HasWork()
+    local zoneNodes = buyZones and buyableZoneNodes() or {}
+    local has
+
+    if #zoneNodes > 0 then
+        has = true
+    elseif not buyCore then
+        has = false
+    else
+        has = #buyableCoreNodes() > 0
+    end
+
+    if not has and enabled then
+        local now = tick()
+        if now - lastIdleReport >= math.max(checkInterval, 15) then
+            lastIdleReport = now
+            reportIdle()
+        end
+    end
+
+    return has
+end
+
 
 function autoResearch.Step()
     if not enabled or busy then

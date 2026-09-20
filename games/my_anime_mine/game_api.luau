@@ -492,8 +492,18 @@ function api.SkillNodes(zoneKey)
     local power = api.MinePower()
     local list = {}
 
-    pcall(function()
-        for _, node in ipairs(mineConfig.GetSkillNodes(zoneKey) or {}) do
+    local ok, nodes = pcall(mineConfig.GetSkillNodes, zoneKey)
+    if not ok or type(nodes) ~= "table" then
+        return list
+    end
+
+    for _, node in ipairs(nodes) do
+        -- One pcall PER NODE. Wrapping the whole loop in a single pcall
+        -- meant one awkward family could throw and hand back an empty
+        -- list, which reads identically to "there is nothing to buy" -
+        -- and Auto Research would then quietly never take a turn again.
+        local built
+        local gotNode = pcall(function()
             local level = tonumber(skills[node.Family]) or 0
             local max = tonumber(mineConfig.GetSkillMax(zoneKey, node.Family)) or 0
             local cost = nil
@@ -503,7 +513,7 @@ function api.SkillNodes(zoneKey)
 
             local powerReq = skillPowerReq(zoneKey, node.Family, level + 1)
 
-            table.insert(list, {
+            built = {
                 zoneKey = zoneKey,
                 id = node.Id,
                 family = node.Family,
@@ -517,9 +527,13 @@ function api.SkillNodes(zoneKey)
                 powerOk = (powerReq == nil) or (power >= powerReq),
                 maxed = mineConfig.IsSkillNodeMaxed(skills, node) and true or false,
                 open = mineConfig.IsSkillNodeOpen(skills, node) and true or false,
-            })
+            }
+        end)
+
+        if gotNode and built then
+            table.insert(list, built)
         end
-    end)
+    end
 
     return list
 end
