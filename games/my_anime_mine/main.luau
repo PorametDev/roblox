@@ -62,6 +62,35 @@ return function(import)
         "กดหินอัตโนมัติทุก Node ใน plot ปัจจุบัน (ยิง ClickDetector 'NodeClick')"
     ), "autoMine", autoMine.SetEnabled)
 
+    -- Total click traffic is nodes x clicks x speed per second, so these two
+    -- multiply each other - worth turning up deliberately rather than
+    -- maxing both.
+    local savedMineSpeed = config.Get("autoMineSpeed", 5)
+    farmTab:AddSlider(
+        "Auto Mine: ความเร็ว",
+        "จำนวนรอบต่อวินาที (ยิ่งสูงยิ่งถี่)",
+        1, 30, savedMineSpeed,
+        function(value)
+            config.Set("autoMineSpeed", value)
+            autoMine.SetCyclesPerSecond(value)
+        end,
+        "/s"
+    )
+    autoMine.SetCyclesPerSecond(savedMineSpeed)
+
+    local savedMineClicks = config.Get("autoMineClicks", 1)
+    farmTab:AddSlider(
+        "Auto Mine: คลิกต่อรอบ",
+        "ยิงซ้ำกี่ครั้งต่อ Node ในแต่ละรอบ",
+        1, 10, savedMineClicks,
+        function(value)
+            config.Set("autoMineClicks", value)
+            autoMine.SetClicksPerCycle(value)
+        end,
+        "x"
+    )
+    autoMine.SetClicksPerCycle(savedMineClicks)
+
     persistentToggle(farmTab:AddCard(
         "Auto Place Miner",
         "เลือก miner ที่พลังสูงสุดจาก Backpack ไปวางลง Holder ที่ว่างอัตโนมัติ"

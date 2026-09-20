@@ -9,7 +9,16 @@ local log = import("core/logger")
 
 -- NodeClick's MaxActivationDistance is 34 studs; firing on an interval
 -- instead of every frame avoids hammering the server for no benefit.
-local FIRE_INTERVAL = 0.2
+--
+-- Two dials, both adjustable from the menu and remembered in config:
+--   cyclesPerSecond - how often every node gets clicked (was a fixed 5,
+--     i.e. one cycle per 0.2s)
+--   clicksPerCycle  - how many times each node is clicked per cycle (was
+--     a fixed 1)
+-- Total traffic is nodes x clicksPerCycle x cyclesPerSecond per second, so
+-- both maxed out is a lot of remote calls - worth being deliberate about.
+local DEFAULT_CYCLES_PER_SECOND = 5
+local DEFAULT_CLICKS_PER_CYCLE = 1
 
 local function findClickDetector(instance)
     return instance:FindFirstChildWhichIsA("ClickDetector", true)
@@ -18,6 +27,16 @@ end
 local autoMine = {}
 local enabled = false
 local lastFire = 0
+local cyclesPerSecond = DEFAULT_CYCLES_PER_SECOND
+local clicksPerCycle = DEFAULT_CLICKS_PER_CYCLE
+
+function autoMine.SetCyclesPerSecond(value)
+    cyclesPerSecond = math.clamp(value, 1, 30)
+end
+
+function autoMine.SetClicksPerCycle(value)
+    clicksPerCycle = math.clamp(value, 1, 10)
+end
 
 function autoMine.SetEnabled(state)
     if state == enabled then
@@ -37,7 +56,7 @@ function autoMine.Step()
     end
 
     local now = tick()
-    if now - lastFire < FIRE_INTERVAL then
+    if now - lastFire < 1 / cyclesPerSecond then
         return
     end
     lastFire = now
@@ -55,7 +74,9 @@ function autoMine.Step()
     for _, node in ipairs(parts.Nodes:GetChildren()) do
         local detector = findClickDetector(node)
         if detector then
-            fireclickdetector(detector)
+            for _ = 1, clicksPerCycle do
+                fireclickdetector(detector)
+            end
         end
     end
 end

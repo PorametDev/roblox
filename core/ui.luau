@@ -338,9 +338,12 @@ function UI:AddTab(name, icon, opts)
         return cardApi
     end
 
-    function tab:AddSlider(title, subtitle, min, max, default, callback)
+    -- suffix defaults to "%" so existing callers keep working; pass "x",
+    -- "/s" and the like for sliders that aren't percentages.
+    function tab:AddSlider(title, subtitle, min, max, default, callback, suffix)
+        suffix = suffix or "%"
         local card = self:AddCard(title, subtitle)
-        local valueLbl = card:SetValue(tostring(default) .. "%")
+        local valueLbl = card:SetValue(tostring(default) .. suffix)
 
         local track = Instance.new("Frame")
         track.Size = UDim2.new(1, 0, 0, 4)
@@ -380,7 +383,7 @@ function UI:AddTab(name, icon, opts)
                 fill.Size = UDim2.new(relative, 0, 1, 0)
                 knob.Position = UDim2.new(relative, -7, 0.5, -7)
                 local value = math.floor(min + (max - min) * relative)
-                valueLbl.Text = tostring(value) .. "%"
+                valueLbl.Text = tostring(value) .. suffix
                 callback(value)
             end
         end)
