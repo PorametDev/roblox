@@ -19,8 +19,22 @@ local rrIndex = 0
 local currentTask = nil
 local sliceEnd = 0
 
-function scheduler.Register(name, step, isEnabled)
-    table.insert(tasks, { name = name, step = step, isEnabled = isEnabled })
+function scheduler.Register(name, step, isEnabled, isBusy)
+    table.insert(tasks, { name = name, step = step, isEnabled = isEnabled, isBusy = isBusy })
+end
+
+-- A task whose job spans several seconds (teleport, open, click, teleport
+-- back) must finish before anyone else runs - otherwise one task's
+-- teleport-back yanks the character away mid-click of another's. Auto Sell
+-- returning home exactly as Auto Chest clicked Take All is why nothing was
+-- ever collected.
+local function anyBusy()
+    for _, task_ in ipairs(tasks) do
+        if task_.isBusy and task_.isBusy() then
+            return true
+        end
+    end
+    return false
 end
 
 local function pickNextEnabled()
@@ -43,6 +57,10 @@ function scheduler.Start()
     end
 
     connection = RunService.Heartbeat:Connect(function()
+        if anyBusy() then
+            return
+        end
+
         local now = tick()
 
         if not currentTask or not currentTask.isEnabled() or now > sliceEnd then

@@ -4,8 +4,10 @@
 -- ran after a successful sell, since that path just let the frame close on
 -- its own. Centralizing To/Return here means every caller gets the same
 -- save-once/restore-once behavior instead of reimplementing it themselves.
-return function(import)
-
+--
+-- Deliberately a leaf module (no `function(import)` wrapper): import()
+-- caches by path, so every caller shares ONE savedCFrame. Wrapped, each
+-- caller got its own instance and they fought over where "home" was.
 local Players = game:GetService("Players")
 
 local teleport = {}
@@ -47,5 +49,3 @@ function teleport.IsAway()
 end
 
 return teleport
-
-end

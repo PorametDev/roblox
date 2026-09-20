@@ -20,11 +20,16 @@ return function(import)
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-local teleport = import("core/teleport")(import)
-local click = import("core/click")(import)
+local teleport = import("core/teleport")
+local click = import("core/click")
 local log = import("core/logger")
 
 local CHECK_INTERVAL = 3
+-- Once everything sellable is gone, the leftovers (equipped units and the
+-- like) can't be selected at all, so Select All does nothing and the Sell
+-- label never shows a price. That's a normal state, not a failure - back
+-- off properly instead of retrying every few seconds.
+local NOTHING_SELLABLE_COOLDOWN = 60
 
 local function getSellFrame()
     local playerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
@@ -94,6 +99,12 @@ end
 
 function autoSell.IsEnabled()
     return enabled
+end
+
+-- The scheduler holds everyone else off while a job is mid-flight - Auto
+-- Sell's teleport home used to land right on top of Auto Chest's Take All.
+function autoSell.IsBusy()
+    return busy
 end
 
 local function runJob()
@@ -174,8 +185,13 @@ local function runJob()
         clickButton(sellButton)
         log("[AutoSell] clicked SellButton")
     else
-        log("[AutoSell] SellButton never showed a price, label = '" .. tostring(sawLabel)
-            .. "', SelectAllButton label = '" .. (selectAllButton and labelText(selectAllButton) or "nil") .. "'")
+        lastAttempt = tick() + NOTHING_SELLABLE_COOLDOWN - CHECK_INTERVAL
+        local closeButton = sellFrame:FindFirstChild("Close")
+        if closeButton then
+            clickButton(closeButton)
+        end
+        log("[AutoSell] nothing selectable (" .. cardCount .. " cards left, label = '"
+            .. tostring(sawLabel) .. "'), backing off " .. NOTHING_SELLABLE_COOLDOWN .. "s")
     end
 
     task.wait(0.5)

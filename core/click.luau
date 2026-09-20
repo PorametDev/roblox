@@ -9,8 +9,6 @@
 -- through the normal input pipeline, so every connection the game has gets
 -- hit exactly like a player click. It requires the button to actually be
 -- visible on screen (that's why popup-hiding had to go).
-return function(import)
-
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local GuiService = game:GetService("GuiService")
 
@@ -48,5 +46,3 @@ function click.Real(button)
 end
 
 return click
-
-end

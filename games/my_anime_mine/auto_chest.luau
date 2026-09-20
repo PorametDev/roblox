@@ -15,7 +15,8 @@ return function(import)
 local Players = game:GetService("Players")
 local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
 local getPlotParts = import("games/my_anime_mine/get_plot_parts")
-local teleport = import("core/teleport")(import)
+local teleport = import("core/teleport")
+local click = import("core/click")
 local log = import("core/logger")
 
 local CHECK_INTERVAL = 3
@@ -42,10 +43,16 @@ local function getItemCount(chestFrame)
     return tonumber(digits)
 end
 
+-- Real mouse click rather than firesignal: firesignal reached our own
+-- Interaction Logger but not always the game's handler (Auto Sell's
+-- buttons never responded to it at all), and 74 TakeButton "clicks" in a
+-- row left the chest count climbing untouched.
 local function clickButton(button)
-    pcall(function()
-        firesignal(button.Activated)
-    end)
+    local ok, err = click.Real(button)
+    if not ok then
+        log("[AutoChest] click failed on " .. button.Name .. ": " .. tostring(err))
+    end
+    return ok
 end
 
 local function getChestPrompt()
@@ -80,6 +87,11 @@ function autoChest.IsEnabled()
     return enabled
 end
 
+-- The scheduler holds everyone else off while a job is mid-flight.
+function autoChest.IsBusy()
+    return busy
+end
+
 local function runJob()
     busy = true
 
@@ -101,7 +113,9 @@ local function runJob()
         return
     end
 
-    task.wait(0.3)
+    -- Long enough for the open animation to finish - a real mouse click
+    -- needs the button sitting at its final on-screen position.
+    task.wait(0.8)
 
     if not enabled then
         teleport.Return()
@@ -132,10 +146,20 @@ local function runJob()
     local takeButton = getTakeButton(chestFrame)
     if takeButton then
         clickButton(takeButton)
-        log("[AutoChest] clicked TakeButton (" .. tostring(count) .. " items)")
+
+        -- Verify rather than assume: the count climbing untouched across 74
+        -- "successful" clicks is how we found out the old click never
+        -- reached the game at all.
+        task.wait(0.6)
+        local after = getItemCount(chestFrame)
+        if after and count and after < count then
+            log("[AutoChest] Take All worked: " .. count .. " -> " .. after .. " items")
+        else
+            log("[AutoChest] Take All had NO effect (" .. tostring(count)
+                .. " -> " .. tostring(after) .. " items)")
+        end
     end
 
-    task.wait(0.5)
     teleport.Return()
     busy = false
 end

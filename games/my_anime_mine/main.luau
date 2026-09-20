@@ -30,8 +30,8 @@ return function(import)
     -- Auto Mine/Auto Chest are still acting on the plot).
     scheduler.Register("AutoMine", autoMine.Step, autoMine.IsEnabled)
     scheduler.Register("AutoPlace", autoPlace.Step, autoPlace.IsEnabled)
-    scheduler.Register("AutoChest", autoChest.Step, autoChest.IsEnabled)
-    scheduler.Register("AutoSell", autoSell.Step, autoSell.IsEnabled)
+    scheduler.Register("AutoChest", autoChest.Step, autoChest.IsEnabled, autoChest.IsBusy)
+    scheduler.Register("AutoSell", autoSell.Step, autoSell.IsEnabled, autoSell.IsBusy)
     scheduler.Register("AutoUpgrade", autoUpgrade.Step, autoUpgrade.IsEnabled)
     scheduler.Start()
 
