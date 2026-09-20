@@ -61,6 +61,7 @@ return function(import)
     local autoUpgrade = import("games/my_anime_mine/auto_upgrade")(import)
     local autoResearch = import("games/my_anime_mine/auto_research")(import)
     local autoClaim = import("games/my_anime_mine/auto_claim")(import)
+    local autoPlot = import("games/my_anime_mine/auto_plot")(import)
     local gameApi = import("games/my_anime_mine/game_api")(import)
 
     -- Standalone: only fires ClickDetectors, which ignore distance, so
@@ -80,6 +81,7 @@ return function(import)
     scheduler.RegisterExclusive("AutoUpgrade", autoUpgrade.Step, autoUpgrade.IsEnabled, autoUpgrade.IsBusy, autoUpgrade.HasWork)
     scheduler.RegisterExclusive("AutoResearch", autoResearch.Step, autoResearch.IsEnabled, autoResearch.IsBusy, autoResearch.HasWork)
     scheduler.RegisterExclusive("AutoClaim", autoClaim.Step, autoClaim.IsEnabled, autoClaim.IsBusy, autoClaim.HasWork)
+    scheduler.RegisterExclusive("AutoPlot", autoPlot.Step, autoPlot.IsEnabled, autoPlot.IsBusy, autoPlot.HasWork)
 
     -- Sell stays last in the order, but "place before sell" is now stated
     -- as a dependency instead of relying on that position: Auto Sell
@@ -276,6 +278,26 @@ return function(import)
     persistentSlider(farmTab, "Auto Claim: เก็บสูงสุดต่อรอบ", "เกมเว้น 0.6 วิต่อการเก็บหนึ่งครั้ง",
         1, 30, "autoClaimMaxPerPass", 10, autoClaim.SetMaxPerPass, "x")
 
+    persistentToggle(farmTab:AddCard(
+        "Auto Upgrade Plot (Zone)",
+        "ซื้อโซนถัดไปและย้ายไปขุดโซนที่ลึกที่สุดที่มีอยู่เสมอ"
+    ), "autoPlot", autoPlot.SetEnabled)
+    persistentSlider(farmTab, "Auto Plot: รอบเช็ค", "เช็คโซนทุกกี่วินาที",
+        5, 300, "autoPlotInterval", 30, autoPlot.SetCheckInterval, "s")
+    persistentToggle(
+        farmTab:AddCard("Auto Plot: ซื้อโซนถัดไป",
+            "ปุ่มบนป้ายใช้ remote เดียวกับการสลับโซน - server เป็นคนตัดสินว่าซื้อหรือย้าย"),
+        "autoPlotBuy", autoPlot.SetBuyNextZone, true
+    )
+    persistentToggle(
+        farmTab:AddCard("Auto Plot: ใช้โซนล่าสุดเสมอ",
+            "ถ้าเผลอย้ายไปโซนเก่า จะย้ายกลับมาโซนที่ลึกที่สุดให้"),
+        "autoPlotLatest", autoPlot.SetUseLatestZone, true
+    )
+    persistentSlider(farmTab, "Auto Plot: กันเงินไว้", "โซนแพงกว่า research มาก จึงมีเงินสำรองของตัวเอง",
+        0, 500, "autoPlotKeepMoney", 0,
+        function(value) autoPlot.SetKeepMoney(value * 1e6) end, "M")
+
     -- The debug tab is built by core/debug_tab and only when this is a dev
     -- build. In a prod bundle scripts/build.py leaves every core/debug_*
     -- module out of the output entirely, so this import has to stay inside
@@ -327,6 +349,7 @@ return function(import)
         autoUpgrade.SetEnabled(false)
         autoResearch.SetEnabled(false)
         autoClaim.SetEnabled(false)
+        autoPlot.SetEnabled(false)
         if stopDebug then
             stopDebug()
         end

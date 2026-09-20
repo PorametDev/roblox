@@ -53,10 +53,24 @@ function scheduler.RegisterStandalone(name, step, isEnabled)
     table.insert(standaloneTasks, { name = name, step = step, isEnabled = isEnabled })
 end
 
+-- Nothing waits longer than this for a turn unless it asks to. Auto Sell
+-- got an explicit cap after it was starved outright; Auto Research then
+-- turned out to be waiting 40+ seconds behind Chest and Upgrade for the
+-- same reason, which is what made it look like it had stopped buying -
+-- switching other automations off was "fixing" it by removing rivals.
+-- Starvation is a property of strict priority, not of any one task, so
+-- the floor belongs to all of them.
+local DEFAULT_MAX_WAIT = 45
+
 -- maxWait: seconds this task will tolerate being outranked while it has
--- work waiting. nil means "no floor" - fine for anything that can't be
--- starved into uselessness.
+-- work waiting. Pass false for "no floor at all".
 function scheduler.RegisterExclusive(name, step, isEnabled, isBusy, hasWork, maxWait)
+    if maxWait == nil then
+        maxWait = DEFAULT_MAX_WAIT
+    elseif maxWait == false then
+        maxWait = nil
+    end
+
     table.insert(exclusiveTasks, {
         name = name,
         step = step,

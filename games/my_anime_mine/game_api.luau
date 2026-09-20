@@ -29,6 +29,7 @@
 return function(import)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 local log = import("core/logger")
 
 local api = {}
@@ -536,6 +537,95 @@ function api.SkillNodes(zoneKey)
     end
 
     return list
+end
+
+-- Zones. MineZoneBoardClient binds every row on the plot's board - owned
+-- or not, priced or "Locked" - to the same single event:
+--
+--   GameState.SendEvent("MineSelectZone", zoneKey)
+--
+-- So switching to a zone you own and buying the next one are the same
+-- call, and the server decides which one it was. MineGame.CurrentZone is
+-- an INDEX into MineConfig.ZoneKeys, not a key.
+function api.CurrentZoneIndex()
+    local mine = api.GetMineData()
+    return mine and tonumber(mine.CurrentZone) or 1
+end
+
+function api.CurrentZoneKey()
+    local keys = api.ZoneKeys()
+    return keys[api.CurrentZoneIndex()] or keys[1]
+end
+
+function api.SelectZone(zoneKey)
+    return send("MineSelectZone", zoneKey)
+end
+
+function api.ZoneDisplayName(zoneKey)
+    if not modules() then
+        return zoneKey
+    end
+    local ok, zone = pcall(function() return mineConfig.Zones[zoneKey] end)
+    return (ok and zone and zone.DisplayName) or zoneKey
+end
+
+-- How far the zone's research tree has been taken, which is what gates
+-- the next zone.
+function api.ZoneResearchProgress(zoneKey)
+    if not modules() then
+        return 0, 0
+    end
+
+    local mine = api.GetMineData()
+    if not mine then
+        return 0, 0
+    end
+
+    local ok, done, total = pcall(mineConfig.GetZoneResearchProgress, mine.Skills, zoneKey)
+    if not ok then
+        return 0, 0
+    end
+    return tonumber(done) or 0, tonumber(total) or 0
+end
+
+-- The unlock price isn't in any client config - the board is a physical
+-- SurfaceGui on the plot with the number already rendered into it, so the
+-- only way to read it is to read the sign. Rows are ZoneRow<i>, matching
+-- MineConfig.ZoneKeys by position.
+function api.ZoneBoardPriceText(zoneIndex)
+    local plots = Workspace:FindFirstChild("MineWorld")
+    plots = plots and plots:FindFirstChild("Plots")
+    if not plots then
+        return nil
+    end
+
+    local userId = game:GetService("Players").LocalPlayer.UserId
+    local myPlot = nil
+    for _, plot in ipairs(plots:GetChildren()) do
+        if plot:GetAttribute("OwnerUserId") == userId then
+            myPlot = plot
+            break
+        end
+    end
+    if not myPlot then
+        return nil
+    end
+
+    local board = myPlot:FindFirstChild("ZoneBoard")
+    local gui = board and board:FindFirstChild("ZoneBoardGui")
+    local root = gui and gui:FindFirstChild("Root")
+    local list = root and root:FindFirstChild("List")
+    local row = list and list:FindFirstChild("ZoneRow" .. zoneIndex)
+    if not row then
+        return nil
+    end
+
+    for _, descendant in ipairs(row:GetDescendants()) do
+        if descendant:IsA("TextLabel") and descendant.Text ~= "" then
+            return descendant.Text
+        end
+    end
+    return nil
 end
 
 -- The plot's own level for a zone, straight from the same helper the tree
