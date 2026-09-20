@@ -10,6 +10,7 @@ return function(import)
 
     local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
     local getPlotParts = import("games/my_anime_mine/get_plot_parts")
+    local dumpInstance = import("games/my_anime_mine/debug_dump")
 
     local farmTab = window:AddTab("ฟาร์ม", "🏠")
     -- Business logic for My Anime Mine goes here.
@@ -37,6 +38,38 @@ return function(import)
             "[MyAnimeMine] current plot: %s | Nodes: %d | Holders: %d",
             plot.Name, nodeCount, holderCount
         ))
+    end)
+
+    local dumpBtn
+    dumpBtn = farmTab:AddCard(
+        "Debug: Dump Node/Holder",
+        "กดเพื่อบันทึกโครงสร้างข้างใน Node แรกกับ Holder แรกลง MekPro.log"
+    ):AddButton("Dump", function()
+        local plot = getCurrentPlot()
+        if not plot then
+            dumpBtn.Text = "no plot"
+            return
+        end
+
+        local parts = getPlotParts(plot)
+
+        local firstNode = parts.Nodes and parts.Nodes:GetChildren()[1]
+        if firstNode then
+            log("[MyAnimeMine] === Node: " .. firstNode.Name .. " ===")
+            dumpInstance(firstNode, log)
+        else
+            log("[MyAnimeMine] no nodes present right now")
+        end
+
+        local firstHolder = parts.Holders and parts.Holders:GetChildren()[1]
+        if firstHolder then
+            log("[MyAnimeMine] === Holder: " .. firstHolder.Name .. " ===")
+            dumpInstance(firstHolder, log)
+        else
+            log("[MyAnimeMine] no holders found")
+        end
+
+        dumpBtn.Text = "done - see MekPro.log"
     end)
 
     local settingsTab = window:AddTab("ตั้งค่า", "⚙")
