@@ -15,6 +15,11 @@ local function log(message)
     -- and confirm this line is actually in it before calling it a success.
     local ok, err = pcall(function()
         if appendfile then
+            -- appendfile errors (rather than creating it) when the file
+            -- doesn't exist yet on this executor.
+            if isfile and not isfile(LOG_FILE) then
+                writefile(LOG_FILE, "")
+            end
             appendfile(LOG_FILE, line .. "\n")
         elseif writefile then
             local existing = ""
