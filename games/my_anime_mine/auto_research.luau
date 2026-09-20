@@ -20,13 +20,18 @@
 -- Costs are real now (GetSkillCost / CoreUpgradeById.Cost), so an unaffordable
 -- node is skipped rather than fired at and silently dropped.
 --
--- And there is a THIRD gate past "open" and "affordable": team power.
--- MineSkillTreeClient greys the button out with "Needs X team power (you
--- have Y)" when GetSkillPowerReq(zone, family, nextLevel) is above the
--- player's MinePower attribute. The plot's own level - the NodeLevel
--- family, which makes rocks tougher and ore worth more - is gated exactly
--- this way, so ignoring it meant firing at a node the server always
--- refuses and burning a slot out of maxPerPass doing it.
+-- Team power is a SOFT gate, and getting that wrong stopped research
+-- dead. MineSkillTreeClient greys the button out with "Needs X team power
+-- (you have Y)" when GetSkillPowerReq(zone, family, nextLevel) exceeds the
+-- player's MinePower - but that check lives only in the rendering code.
+-- buySelected(), the thing the button actually calls, checks nothing but
+-- maxed and open. Treating the grey-out as a hard block made this filter
+-- stricter than the game's own and left affordable nodes unbought.
+--
+-- So power-blocked nodes are now sorted to the BACK rather than dropped:
+-- everything else gets bought first, and if nothing else is available they
+-- still get tried, because one refused remote costs far less than never
+-- buying. The requirement is reported either way.
 return function(import)
 
 local gameApi = import("games/my_anime_mine/game_api")(import)
@@ -36,6 +41,12 @@ local checkInterval = 30
 local maxPerPass = 5
 local buyZones = true
 local buyCore = true
+-- The Core tree is optional; the zone tree is what gates the next zone.
+-- Core nodes cost millions where zone nodes cost thousands, so letting
+-- them share a wallet means one Core purchase can swallow the balance a
+-- hundred zone nodes were waiting on. Holding Core back until the zone
+-- tree has nothing buyable keeps the required track moving first.
+local coreLastResort = true
 -- Cheapest open node first, so a pass spreads across the tree instead of
 -- saving up for one expensive node while ten $22 ones sit unbought.
 local cheapestFirst = true
@@ -80,6 +91,10 @@ function autoResearch.SetBuyCore(state)
     buyCore = state
 end
 
+function autoResearch.SetCoreLastResort(state)
+    coreLastResort = state
+end
+
 function autoResearch.SetCheapestFirst(state)
     cheapestFirst = state
 end
@@ -93,6 +108,7 @@ local function spendable()
 end
 
 -- Everything that would actually go through if we pressed Buy on it.
+-- Exactly the conditions buySelected() enforces, and nothing more.
 local function buyableZoneNodes()
     local budget = spendable()
     local list = {}
@@ -101,13 +117,14 @@ local function buyableZoneNodes()
     for _, zoneKey in ipairs(gameApi.UnlockedZones()) do
         for _, node in ipairs(gameApi.SkillNodes(zoneKey)) do
             if node.open and not node.maxed and node.cost and node.cost <= budget then
-                if node.powerOk then
-                    table.insert(list, node)
-                elseif not powerBlocked or node.powerReq < powerBlocked.powerReq then
-                    -- Remember the cheapest power requirement we're short
-                    -- of, so the log can say how far off we are rather than
-                    -- going quiet.
-                    powerBlocked = node
+                table.insert(list, node)
+
+                if not node.powerOk then
+                    -- Cheapest requirement we're short of, so the log can
+                    -- say how far off we are.
+                    if not powerBlocked or node.powerReq < powerBlocked.powerReq then
+                        powerBlocked = node
+                    end
                 end
             end
         end
@@ -136,6 +153,14 @@ end
 -- would compare the wrong pair.
 local function sortNodes(list)
     table.sort(list, function(a, b)
+        -- Anything the tree would grey out for team power goes last, but
+        -- still gets its turn if nothing else is left.
+        local aPower = a.powerOk ~= false
+        local bPower = b.powerOk ~= false
+        if aPower ~= bPower then
+            return aPower
+        end
+
         if a.cost ~= b.cost then
             if cheapestFirst then
                 return a.cost < b.cost
@@ -195,7 +220,11 @@ local function runJob()
         end
     end
 
-    if buyCore then
+    -- Zone nodes still pending means Core waits, even if this pass hit
+    -- maxPerPass before reaching them.
+    local zonesStillWant = coreLastResort and #(buyableZoneNodes()) > 0
+
+    if buyCore and not zonesStillWant then
         local nodes = buyableCoreNodes()
         sortNodes(nodes)
 
@@ -232,7 +261,26 @@ local function runJob()
                 .. math.floor(powerBlocked.power)
                 .. " - upgrade the miners first")
         else
-            log("[AutoResearch] nothing open and affordable right now")
+            log("[AutoResearch] nothing open and affordable right now"
+                .. " (money " .. math.floor(gameApi.GetMoney()) .. ")")
+            -- Name the cheapest thing that is open but out of reach, so
+            -- "it just sits there" is never a mystery again.
+            local nearest = nil
+            for _, zoneKey in ipairs(gameApi.UnlockedZones()) do
+                for _, node in ipairs(gameApi.SkillNodes(zoneKey)) do
+                    if node.open and not node.maxed and node.cost
+                        and (not nearest or node.cost < nearest.cost)
+                    then
+                        nearest = node
+                    end
+                end
+            end
+            if nearest then
+                log("[AutoResearch] cheapest open node: " .. nearest.zoneKey
+                    .. " " .. nearest.id .. " (" .. nearest.family .. ") "
+                    .. nearest.level .. "/" .. nearest.max
+                    .. " costs " .. math.floor(nearest.cost))
+            end
         end
     end
 
@@ -242,13 +290,18 @@ end
 -- Cheap enough to run before committing a turn: it's all table reads off
 -- state the client already holds.
 function autoResearch.HasWork()
-    if buyZones then
-        local nodes = buyableZoneNodes()
-        if #nodes > 0 then
-            return true
-        end
+    local zoneNodes = buyZones and buyableZoneNodes() or {}
+    if #zoneNodes > 0 then
+        return true
     end
-    return buyCore and #buyableCoreNodes() > 0
+
+    if not buyCore then
+        return false
+    end
+    if coreLastResort and #zoneNodes > 0 then
+        return false
+    end
+    return #buyableCoreNodes() > 0
 end
 
 function autoResearch.Step()

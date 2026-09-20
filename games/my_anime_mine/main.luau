@@ -249,6 +249,11 @@ return function(import)
             "แท็บ Core ใช้ remote คนละตัวต่อหนึ่งอัปเกรด - เมื่อก่อนไม่ได้ซื้อเลย"),
         "autoResearchCore", autoResearch.SetBuyCore, true
     )
+    persistentToggle(
+        farmTab:AddCard("Auto Research: Core ต่อเมื่อสาย Zone ตันแล้ว",
+            "Core ราคาหลักล้าน สาย Zone หลักหมื่น - ถ้าใช้เงินก้อนเดียวกัน Core จะกินเงินที่ Zone รออยู่"),
+        "autoResearchCoreLast", autoResearch.SetCoreLastResort, true
+    )
     persistentSegmented(
         farmTab,
         { "ถูกสุดก่อน", "แพงสุดก่อน" },
