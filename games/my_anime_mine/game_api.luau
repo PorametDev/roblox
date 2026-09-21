@@ -553,6 +553,20 @@ function api.BestOwnedPickaxe()
     return best
 end
 
+-- The Inventory screen's "Equip Best" button, which fills the hotbar with
+-- the strongest miners you own:
+--
+--   SendEvent("MineEquipBest")     -- no arguments at all
+--
+-- This is the answer to "why won't it place the better unit": Auto Place
+-- can only place what's ON the hotbar, and the strongest miners often
+-- aren't there. Rather than reimplement the ranking and the
+-- MineAssignHotbar juggling, ask the game to do it - its own button is
+-- one argument-less remote.
+function api.EquipBest()
+    return send("MineEquipBest")
+end
+
 function api.BuySkill(zoneKey, family)
     return send("MineBuySkill", zoneKey, family)
 end
@@ -885,14 +899,27 @@ function api.CharacterBaseDamage(charName)
     return ok and damage or nil
 end
 
--- Same figure for whoever is standing on a holder.
+-- The same figure for whoever is standing on a holder, INCLUDING its
+-- mutation - which is what makes it comparable with a hotbar card.
+--
+-- A card's number already has the stack's mutation baked in, which is how
+-- four "Whale Island Kid" entries can read 72.5B, 45.8B, 42B and 7.6B.
+-- Comparing that against a name-only lookup for the placed miner was
+-- comparing two different things again. Level and pickaxe are still left
+-- out on purpose: levels are bought and pickaxes move, so neither says
+-- anything about which unit is better to own.
 function api.HolderBaseDamage(holderKey)
     local mine = api.GetMineData()
     local holder = mine and (mine.Holders or {})[holderKey]
     if not (holder and holder.CharName) then
         return nil
     end
-    return api.CharacterBaseDamage(holder.CharName)
+
+    local base = api.CharacterBaseDamage(holder.CharName)
+    if not base then
+        return nil
+    end
+    return base * (api.HolderVariantMult(holderKey) or 1)
 end
 
 -- MineConfig.GetMutationRollCost(item, mineGame) - the number the Roll

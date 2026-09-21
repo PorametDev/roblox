@@ -129,6 +129,14 @@ return function(import)
     )
 
     persistentToggle(
+        farmTab:AddCard("Auto Place: ดึงตัวเก่งขึ้น hotbar",
+            "ยิง MineEquipBest ของเกม - Auto Place วางได้เฉพาะตัวที่อยู่บน hotbar เท่านั้น"),
+        "autoPlaceEquipBest", autoPlace.SetUseEquipBest, true
+    )
+    persistentSlider(farmTab, "Auto Place: รอบดึงตัวเก่ง", "ยิง Equip Best ทุกกี่วินาที",
+        5, 300, "autoPlaceEquipBestInterval", 60, autoPlace.SetEquipBestInterval, "s")
+
+    persistentToggle(
         farmTab:AddCard("Auto Place: ปลดล็อกช่อง miner",
             "วาปไปกด E ที่แท่นที่ขึ้น 'Locked miner slot / Unlock' - ทำหลังสุดเมื่อช่องที่มีเต็มแล้ว"),
         "autoPlaceUnlock", autoPlace.SetUnlockSlots

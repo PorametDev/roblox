@@ -42,6 +42,14 @@ local upgradeWeakMiners = true
 -- Unlocking a miner slot has no remote either - the pad's own prompt says
 -- "Locked miner slot / Unlock" and the price is printed on the pad - so
 -- this is the same teleport-and-press-E dance as placing.
+-- Auto Place can only place what is ON the hotbar, and the strongest
+-- miners often aren't: the Inventory screen can be showing an Awakened
+-- Shrine King at 47.7B while the hotbar's best is a 3.1B Adult Hunter.
+-- The Inventory screen's own "Equip Best" button fixes exactly that in one
+-- argument-less remote, so ask the game rather than reimplementing its
+-- ranking and its MineAssignHotbar juggling.
+local useEquipBest = true
+local equipBestInterval = 60
 local unlockSlots = false
 -- 0 = no ceiling. Slots run to $8Qa and beyond, so an accidental
 -- switch-on shouldn't be able to drain everything.
@@ -276,6 +284,8 @@ end
 
 local autoPlace = {}
 local enabled = false
+-- Read by HasWork, which is defined well above refreshHotbar.
+local lastEquipBest = 0
 local busy = false
 local lastAttempt = 0
 local lastReason = nil
@@ -313,6 +323,14 @@ function autoPlace.IsBusy()
     return busy
 end
 
+function autoPlace.SetUseEquipBest(state)
+    useEquipBest = state
+end
+
+function autoPlace.SetEquipBestInterval(seconds)
+    equipBestInterval = math.max(seconds, 5)
+end
+
 function autoPlace.SetUnlockSlots(state)
     unlockSlots = state
 end
@@ -334,6 +352,14 @@ end
 -- Tells the scheduler whether the plot still needs attention, so Auto Sell
 -- doesn't get a turn until every holder is filled and upgraded.
 function autoPlace.HasWork()
+    -- A due Equip Best counts as work in its own right. Without this the
+    -- scheduler would never grant a turn while the hotbar held nothing
+    -- worth placing - which is precisely the situation Equip Best exists
+    -- to get us out of.
+    if useEquipBest and tick() - lastEquipBest >= equipBestInterval then
+        return true
+    end
+
     return (findNextAction()) ~= nil
 end
 
@@ -490,6 +516,37 @@ local function runUpgradeJob(target)
     busy = false
 end
 
+-- Refreshes the hotbar from the inventory, then lets the next Step see the
+-- new cards. Kept on its own timer because it costs a remote and the
+-- inventory rarely changes between placements.
+local function refreshHotbar()
+    if not useEquipBest then
+        return
+    end
+
+    local now = tick()
+    if now - lastEquipBest < equipBestInterval then
+        return
+    end
+    lastEquipBest = now
+
+    local before = getMinerSlots()
+    local bestBefore = before[1] and before[1].power or 0
+
+    gameApi.EquipBest()
+    task.wait(0.6)
+    cachedAt = 0
+
+    local after = getMinerSlots()
+    local bestAfter = after[1] and after[1].power or 0
+
+    if bestAfter > bestBefore then
+        log("[AutoPlace] Equip Best: hotbar's strongest "
+            .. string.format("%.3g", bestBefore) .. " -> "
+            .. string.format("%.3g", bestAfter))
+    end
+end
+
 function autoPlace.Step()
     if not enabled or busy then
         return
@@ -500,6 +557,16 @@ function autoPlace.Step()
         return
     end
     lastAttempt = now
+
+    -- Before deciding anything: the best answer to "nothing here is worth
+    -- placing" is often that the good ones simply aren't on the hotbar.
+    if useEquipBest and now - lastEquipBest >= equipBestInterval then
+        busy = true
+        runGuarded("AutoPlace", refreshHotbar, function()
+            busy = false
+        end)
+        return
+    end
 
     -- Every check above is a read: nothing moves the character until
     -- there's actually something worth doing.

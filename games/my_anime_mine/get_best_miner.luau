@@ -40,10 +40,13 @@ local SUFFIXES = {
 local function parsePower(text)
     local number, suffix = text:match("([%d,%.]+)%s*(%a*)")
     if not number then
-        return 0
+        return nil
     end
 
-    local value = tonumber((number:gsub(",", ""))) or 0
+    local value = tonumber((number:gsub(",", "")))
+    if not value then
+        return nil
+    end
     if suffix ~= "" then
         local multiplier = SUFFIXES[suffix]
             or SUFFIXES[suffix:sub(1, 1):upper() .. suffix:sub(2)]
@@ -96,8 +99,16 @@ local function readSlot(slotFrame)
 
     return {
         name = name,
-        -- The game's own figure first; the card text is only a fallback.
-        power = gameApi.CharacterBaseDamage(name) or parsePower(damageLabel.Text),
+        -- The CARD's number, not a lookup by name.
+        --
+        -- Looking it up by name collapses stacks that differ: the hotbar
+        -- can hold four "Whale Island Kid" entries reading 72.5B, 45.8B,
+        -- 42B and 7.6B, because a stack's damage includes its mutation.
+        -- GetCharacterDamage(name) returns one figure for all four, so the
+        -- best and the worst became indistinguishable. The label is the
+        -- per-stack truth; the name lookup is only a fallback for a card
+        -- whose text won't parse.
+        power = parsePower(damageLabel.Text) or gameApi.CharacterBaseDamage(name) or 0,
         count = readCount(slotFrame),
     }
 end
