@@ -26,6 +26,8 @@ local maxPerPass = 10
 
 local autoClaim = {}
 local enabled = false
+-- Cleared on any change, so the same explanation isn't repeated forever.
+local lastNote = nil
 local busy = false
 local lastAttempt = 0
 
@@ -34,7 +36,19 @@ function autoClaim.SetEnabled(state)
         return
     end
     enabled = state
+    lastNote = nil
     log("[AutoClaim] " .. (enabled and "enabled" or "disabled"))
+
+    -- Say something the moment it's switched on, whatever the scheduler
+    -- decides afterwards.
+    if enabled then
+        task.spawn(function()
+            task.wait(1)
+            if enabled then
+                autoClaim.HasWork()
+            end
+        end)
+    end
 end
 
 function autoClaim.IsEnabled()
@@ -53,8 +67,24 @@ function autoClaim.SetMaxPerPass(count)
     maxPerPass = math.max(count, 1)
 end
 
+-- Reporting lives here for the same reason it does in Auto Research: Step
+-- only runs once the scheduler grants a turn, and a turn is only granted
+-- when this returns true. A silent false is exactly the case that needs
+-- explaining, and it was producing no output at all.
 function autoClaim.HasWork()
-    return #gameApi.ClaimableIndexRewards() > 0
+    local rewards, why = gameApi.ClaimableIndexRewards()
+
+    if #rewards > 0 then
+        lastNote = nil
+        return true
+    end
+
+    if enabled and why and why ~= lastNote then
+        lastNote = why
+        log("[AutoClaim] idle: " .. why)
+    end
+
+    return false
 end
 
 local function stillClaimable(reward, list)

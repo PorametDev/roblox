@@ -987,45 +987,78 @@ local function heldCharacterNames(mine)
     return held
 end
 
--- The tabs are every zone plus the special categories; each maps to a
--- category record whose .Key is the first argument to the claim event.
-local function indexCategoryKeys()
-    local keys = {}
-    local seen = {}
+-- The Index tabs are every zone key plus two fixed extras. The claim
+-- event wants a CATEGORY key, which Category(tab) resolves from a tab -
+-- but when that lookup gives nothing the tab key itself is the sensible
+-- fallback rather than skipping the tab silently, which is what the first
+-- version did.
+local EXTRA_INDEX_TABS = { "Limited", "Exclusive" }
 
+local function indexTabKeys()
+    local tabs = {}
     for _, zoneKey in ipairs(api.ZoneKeys()) do
-        local ok, category = pcall(indexRewards.Category, zoneKey)
-        if ok and type(category) == "table" and category.Key and not seen[category.Key] then
-            seen[category.Key] = true
-            table.insert(keys, category.Key)
-        end
+        table.insert(tabs, zoneKey)
     end
+    for _, extra in ipairs(EXTRA_INDEX_TABS) do
+        table.insert(tabs, extra)
+    end
+    return tabs
+end
 
-    return keys
+local function indexCategoryKey(tabKey)
+    local ok, category = pcall(indexRewards.Category, tabKey)
+    if ok and type(category) == "table" and category.Key then
+        return category.Key
+    end
+    return tabKey
 end
 
 -- Every reward sitting there waiting, as { category, tierKey, index }.
+--
+-- ClaimableTiers().ByKey is keyed by tab - the same table that drives the
+-- red badge on each tab - so it says outright which tabs have anything,
+-- and nothing has to be enumerated speculatively.
 function api.ClaimableIndexRewards()
     if not modules() then
-        return {}
+        return {}, "modules not loaded"
     end
 
     local mine = api.GetMineData()
-    if not mine or indexRewards.Enabled ~= true then
-        return {}
+    if not mine then
+        return {}, "no mine data"
     end
 
+    if indexRewards.Enabled ~= true then
+        return {}, "index rewards are disabled in this game build"
+    end
+
+    local ok, tiers = pcall(indexRewards.ClaimableTiers, mine)
+    if not ok or type(tiers) ~= "table" then
+        return {}, "ClaimableTiers failed"
+    end
+
+    local total = tonumber(tiers.Total) or 0
+    if total <= 0 then
+        return {}, "nothing claimable"
+    end
+
+    local byKey = tiers.ByKey or {}
     local list = {}
+    local notes = {}
 
-    pcall(function()
-        local held = heldCharacterNames(mine)
+    local held = heldCharacterNames(mine)
 
-        for _, category in ipairs(indexCategoryKeys()) do
-            local total = tonumber(indexRewards.Total(category)) or 0
-            if total > 0 then
-                local state = indexRewards.State(mine, category, held)
+    for _, tabKey in ipairs(indexTabKeys()) do
+        local waiting = tonumber(byKey[tabKey]) or 0
+        if waiting > 0 then
+            local category = indexCategoryKey(tabKey)
+            local gotState, state = pcall(indexRewards.State, mine, category, held)
 
-                for _, tier in ipairs((state and state.Track) or {}) do
+            if not gotState or type(state) ~= "table" or type(state.Track) ~= "table" then
+                table.insert(notes, tabKey .. ": State(" .. tostring(category) .. ") gave nothing")
+            else
+                local before = #list
+                for _, tier in ipairs(state.Track) do
                     if tier.Reached and not tier.Claimed then
                         local claimed = tier.ClaimedRewards or {}
                         for index in ipairs(tier.Rewards or {}) do
@@ -1039,9 +1072,18 @@ function api.ClaimableIndexRewards()
                         end
                     end
                 end
+                if #list == before then
+                    table.insert(notes, tabKey .. ": badge says " .. waiting
+                        .. " but no unclaimed reward in its Track")
+                end
             end
         end
-    end)
+    end
+
+    if #list == 0 then
+        return {}, "badge says " .. total .. " claimable but none could be resolved"
+            .. (#notes > 0 and (" - " .. table.concat(notes, "; ")) or "")
+    end
 
     return list
 end
