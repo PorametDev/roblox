@@ -25,6 +25,7 @@ local getCurrentPlot = import("games/my_anime_mine/get_current_plot")
 local getPlotParts = import("games/my_anime_mine/get_plot_parts")
 local getMinerSlots = import("games/my_anime_mine/get_best_miner")(import)
 local teleport = import("core/teleport")
+local parseMoney = import("core/parse_money")
 local gameApi = import("games/my_anime_mine/game_api")(import)
 local log = import("core/logger")
 local runGuarded = import("core/run_job")(import)
@@ -38,6 +39,13 @@ local LOCKED_SLOT_TEXT = "Locked miner slot"
 -- which beats simulating a number-key press. Note KEY, not number - the
 -- game sends it as a string and MineGame.Hotbar is keyed that way.
 local upgradeWeakMiners = true
+-- Unlocking a miner slot has no remote either - the pad's own prompt says
+-- "Locked miner slot / Unlock" and the price is printed on the pad - so
+-- this is the same teleport-and-press-E dance as placing.
+local unlockSlots = false
+-- 0 = no ceiling. Slots run to $8Qa and beyond, so an accidental
+-- switch-on shouldn't be able to drain everything.
+local unlockBudget = 0
 
 local function findHolderPrompt(holder)
     local pad = holder:FindFirstChild("Pad")
@@ -144,7 +152,7 @@ local function surveyHolders()
         return nil
     end
 
-    local empty, occupied = {}, {}
+    local empty, occupied, lockedPads = {}, {}, {}
     local summary = {}
 
     for _, holder in ipairs(parts.Holders:GetChildren()) do
@@ -153,6 +161,19 @@ local function surveyHolders()
             local locked, why = isLocked(prompt, holder)
             if locked then
                 table.insert(summary, holder.Name .. "=locked(" .. why .. ")")
+
+                -- A pad showing a price is one you can buy; one that is
+                -- simply disabled is not for sale at any price.
+                local priceText = findPriceTag(holder)
+                local price = priceText and parseMoney(priceText) or nil
+                if prompt.Enabled and price and price ~= math.huge then
+                    table.insert(lockedPads, {
+                        holder = holder,
+                        prompt = prompt,
+                        price = price,
+                        priceText = priceText,
+                    })
+                end
             elseif isEmpty(prompt) then
                 table.insert(summary, holder.Name .. "=empty")
                 table.insert(empty, { holder = holder, prompt = prompt })
@@ -192,7 +213,11 @@ local function surveyHolders()
         return a.power < b.power
     end)
 
-    return { empty = empty, occupied = occupied }
+    table.sort(lockedPads, function(a, b)
+        return a.price < b.price
+    end)
+
+    return { empty = empty, occupied = occupied, locked = lockedPads }
 end
 
 -- The scheduler asks HasWork every frame, and a survey walks every holder's
@@ -231,6 +256,19 @@ local function findNextAction()
     local weakest = upgradeWeakMiners and survey.occupied[1] or nil
     if weakest and candidates[1].power > weakest.power then
         return "upgrade", weakest, candidates[1]
+    end
+
+    -- Last, because a new pad is only worth buying once the ones we have
+    -- are full and holding the best miners available.
+    if unlockSlots then
+        local money = gameApi.GetMoney()
+        for _, pad in ipairs(survey.locked or {}) do
+            if pad.price <= money
+                and (unlockBudget == 0 or pad.price <= unlockBudget)
+            then
+                return "unlock", pad, nil
+            end
+        end
     end
 
     return nil
@@ -273,6 +311,14 @@ end
 
 function autoPlace.IsBusy()
     return busy
+end
+
+function autoPlace.SetUnlockSlots(state)
+    unlockSlots = state
+end
+
+function autoPlace.SetUnlockBudget(amount)
+    unlockBudget = math.max(amount, 0)
 end
 
 function autoPlace.SetCheckInterval(seconds)
@@ -407,6 +453,29 @@ local function runFillJob(target)
     busy = false
 end
 
+local function runUnlockJob(pad)
+    busy = true
+
+    if goTo(pad.prompt) then
+        firePrompt(pad.prompt)
+        task.wait(0.8)
+
+        -- The pad stops being locked when it works; nothing else to check.
+        local stillLocked = isLocked(pad.prompt, pad.holder)
+        if stillLocked then
+            log("[AutoPlace] " .. pad.holder.Name .. " still locked after paying "
+                .. tostring(pad.priceText))
+        else
+            log("[AutoPlace] unlocked " .. pad.holder.Name
+                .. " for " .. tostring(pad.priceText))
+        end
+    end
+
+    teleport.Return()
+    cachedAt = 0
+    busy = false
+end
+
 local function runUpgradeJob(target)
     busy = true
 
@@ -449,6 +518,17 @@ function autoPlace.Step()
     if action == "fill" then
         runGuarded("AutoPlace", function()
             runFillJob(target)
+        end, function()
+            busy = false
+        end)
+        return
+    end
+
+    if action == "unlock" then
+        log("[AutoPlace] unlocking " .. target.holder.Name
+            .. " for " .. tostring(target.priceText))
+        runGuarded("AutoPlace", function()
+            runUnlockJob(target)
         end, function()
             busy = false
         end)

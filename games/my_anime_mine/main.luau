@@ -128,6 +128,15 @@ return function(import)
         "autoPlaceUpgradeWeak", autoPlace.SetUpgradeWeakMiners
     )
 
+    persistentToggle(
+        farmTab:AddCard("Auto Place: ปลดล็อกช่อง miner",
+            "วาปไปกด E ที่แท่นที่ขึ้น 'Locked miner slot / Unlock' - ทำหลังสุดเมื่อช่องที่มีเต็มแล้ว"),
+        "autoPlaceUnlock", autoPlace.SetUnlockSlots
+    )
+    persistentSlider(farmTab, "Auto Place: เพดานราคาปลดช่อง", "0 = ไม่จำกัด",
+        0, 500, "autoPlaceUnlockBudget", 0,
+        function(value) autoPlace.SetUnlockBudget(value * 1e6) end, "M")
+
     persistentToggle(farmTab:AddCard(
         "Auto Chest",
         "อ่านจำนวนจาก state ตรงๆ ถึงเกณฑ์แล้วยิง remote เก็บ (ไม่วาป ไม่เปิด UI)"

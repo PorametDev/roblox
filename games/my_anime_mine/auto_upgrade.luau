@@ -227,14 +227,23 @@ end
 -- cap trades those marginal upgrades for not bleeding money, which is the
 -- right trade while research and unit levels are the bottleneck.
 --
--- "Holders you can place into" is the unlocked slot count rather than the
--- number currently filled, so buying ahead of Auto Place is still allowed.
+-- The ceiling is MaxMinerSlots, not the slots unlocked right now.
+--
+-- Overnight this sat at "7 pickaxe(s) for 7 holder(s) - not buying more"
+-- for six hours while the balance climbed into the quadrillions and two
+-- more slots were still there to be bought. Pegging the cap to the
+-- CURRENT count makes it self-fulfilling: it stops buying pickaxes for
+-- slots that are about to exist, and it never notices when they do.
+-- MaxMinerSlots is the real ceiling and never moves.
 local function pickaxeCapReached()
     if not limitToHolders then
         return false
     end
 
-    local cap = gameApi.MinerSlots()
+    local cap = gameApi.MaxMinerSlots()
+    if cap <= 0 then
+        cap = gameApi.MinerSlots()
+    end
     if cap <= 0 then
         return false
     end
@@ -460,8 +469,8 @@ local function runJob()
         if pickaxeCapReached() then
             if not reportedCap then
                 log("[AutoUpgrade] " .. gameApi.OwnedPickaxeCount()
-                    .. " pickaxe(s) for " .. gameApi.MinerSlots()
-                    .. " holder(s) - not buying more")
+                    .. " pickaxe(s) for " .. gameApi.MaxMinerSlots()
+                    .. " possible holder(s) - not buying more")
                 reportedCap = true
             end
         elseif tryPickaxe() then

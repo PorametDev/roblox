@@ -59,6 +59,9 @@ local autoResearch = {}
 local enabled = false
 local busy = false
 local lastAttempt = 0
+-- Cleared whenever something is bought, so the next idle line describes
+-- the new situation rather than being suppressed as a repeat.
+local lastIdleSummary = nil
 
 -- Forward-declared: reportIdle needs the settings and helpers defined
 -- below it, but SetEnabled above wants to call it.
@@ -235,6 +238,7 @@ local function runJob()
                 log("[AutoResearch] " .. node.zoneKey .. " " .. node.id
                     .. " (" .. node.family .. ") " .. node.level .. " -> " .. after)
                 bought = bought + 1
+                lastIdleSummary = nil
             else
                 blocked = blocked + 1
             end
@@ -262,6 +266,7 @@ local function runJob()
                 log("[AutoResearch] Core " .. node.id
                     .. " (" .. node.family .. ") " .. node.level .. " -> " .. after)
                 bought = bought + 1
+                lastIdleSummary = nil
             else
                 blocked = blocked + 1
             end
@@ -310,57 +315,91 @@ end
 
 -- Cheap enough to run before committing a turn: it's all table reads off
 -- state the client already holds.
--- Why a pass isn't happening. The diagnostics used to live inside runJob,
--- which only runs once the scheduler grants a turn - and the scheduler
--- only grants one when HasWork says yes. So the single case that most
--- needed explaining, "Auto Research is enabled and never takes a turn",
--- was the one case that produced no output whatsoever. It has now cost
--- two wrong guesses.
-function reportIdle()
+-- Why a pass isn't happening.
+--
+-- This started as temporary debugging and then ran overnight: 1,694 idle
+-- reports, 12,396 lines, four per cent of a 341,000-line log, burying
+-- everything worth reading. So it now prints only when the ANSWER
+-- changes. Sitting in the same state for six hours is one line, and the
+-- moment something moves it says so again.
+-- One line: the cheapest thing standing between us and a purchase, and
+-- what's stopping it. Everything else was noise.
+local function idleSummary()
+    -- A switched-off half of the feature is the likeliest explanation and
+    -- the easiest to miss in a menu, so it leads.
+    if not buyZones and not buyCore then
+        return "both Zone and Core buying are switched off"
+    end
+
     local money = gameApi.GetMoney()
     local budget = spendable()
-    local zones = gameApi.UnlockedZones()
+    local nearest = nil
 
-    log("[AutoResearch] idle: money=" .. math.floor(money)
-        .. " budget=" .. math.floor(budget)
-        .. " zones=" .. (#zones > 0 and table.concat(zones, ",") or "(none)")
-        .. " buyZones=" .. tostring(buyZones) .. " buyCore=" .. tostring(buyCore))
-
-    for _, zoneKey in ipairs(zones) do
-        local nodes = gameApi.SkillNodes(zoneKey)
-        local pending = 0
-
-        for _, node in ipairs(nodes) do
-            if not node.maxed then
-                pending = pending + 1
-                -- Cap the noise; a few lines is enough to spot the
-                -- condition that's wrongly false.
-                if pending <= 4 then
-                    log("[AutoResearch]   " .. zoneKey .. " " .. tostring(node.id)
-                        .. " (" .. tostring(node.family) .. ") "
-                        .. node.level .. "/" .. node.max
-                        .. " open=" .. tostring(node.open)
-                        .. " cost=" .. tostring(node.cost)
-                        .. " powerOk=" .. tostring(node.powerOk)
-                        .. " req=" .. tostring(node.powerReq)
-                        .. " power=" .. tostring(node.power))
+    if buyZones then
+        for _, zoneKey in ipairs(gameApi.UnlockedZones()) do
+            for _, node in ipairs(gameApi.SkillNodes(zoneKey)) do
+                if node.open and not node.maxed and node.cost
+                    and (not nearest or node.cost < nearest.cost)
+                then
+                    nearest = node
                 end
             end
         end
-
-        log("[AutoResearch]   " .. zoneKey .. ": " .. #nodes
-            .. " node(s), " .. pending .. " not maxed")
     end
 
-    local coreNodes = gameApi.CoreNodes()
-    local coreOpen = 0
-    for _, node in ipairs(coreNodes) do
-        if node.open and not node.maxed then
-            coreOpen = coreOpen + 1
+    if buyCore then
+        for _, node in ipairs(gameApi.CoreNodes()) do
+            if node.open and not node.maxed and node.cost
+                and (not nearest or node.cost < nearest.cost)
+            then
+                nearest = {
+                    zoneKey = "Core",
+                    id = node.id,
+                    family = node.family,
+                    level = node.level,
+                    max = node.level + 1,
+                    cost = node.cost,
+                    powerOk = true,
+                }
+            end
         end
     end
-    log("[AutoResearch]   Core: " .. #coreNodes .. " node(s), "
-        .. coreOpen .. " open and unmaxed")
+
+    if not nearest then
+        local parts = {}
+        if not buyZones then
+            table.insert(parts, "Zone buying is off")
+        end
+        if not buyCore then
+            table.insert(parts, "Core buying is off")
+        end
+        if #parts == 0 then
+            return "every open node is maxed"
+        end
+        return "nothing left to buy (" .. table.concat(parts, ", ") .. ")"
+    end
+
+    local why
+    if nearest.cost > budget then
+        why = "needs " .. string.format("%.3g", nearest.cost)
+            .. ", have " .. string.format("%.3g", money)
+    elseif nearest.powerOk == false then
+        why = "needs " .. string.format("%.3g", nearest.powerReq) .. " team power"
+    else
+        why = "affordable - waiting for a turn"
+    end
+
+    return "cheapest open node " .. nearest.zoneKey .. " " .. tostring(nearest.id)
+        .. " (" .. tostring(nearest.family) .. ") " .. why
+end
+
+function reportIdle()
+    local summary = idleSummary()
+    if summary == lastIdleSummary then
+        return
+    end
+    lastIdleSummary = summary
+    log("[AutoResearch] idle: " .. summary)
 end
 
 local lastIdleReport = 0
