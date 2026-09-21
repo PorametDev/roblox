@@ -4,6 +4,7 @@ return function(import)
     local antiAfk = import("core/anti_afk")(import)
     local buildEnv = import("core/build_env")
     local scheduler = import("core/scheduler")(import)
+    local spendPolicy = import("core/spend_policy")(import)
     local config = import("core/config")(import)
     local log = import("core/logger")
 
@@ -99,9 +100,27 @@ return function(import)
     local sellMaxWait = config.Get("autoSellMaxWait", 20)
     scheduler.RegisterExclusive("AutoSell", autoSell.Step, autoSell.IsEnabled, autoSell.IsBusy, autoSell.HasWork, sellMaxWait)
 
+    -- One spending order across every automation that buys anything.
+    -- Each reports what it would spend next; the policy decides whose turn
+    -- it is. Free actions - placing miners, handing out pickaxes we
+    -- already own, switching zones - are never gated by it.
+    spendPolicy.Register("AutoResearch", autoResearch.NextPrice)
+    spendPolicy.Register("AutoUpgrade", autoUpgrade.NextPrice)
+    spendPolicy.Register("AutoPlot", autoPlot.NextPrice)
+    spendPolicy.Register("AutoPlace", autoPlace.NextPrice)
+
     scheduler.Start()
 
     local farmTab = window:AddTab("ฟาร์ม", "🏠")
+
+    -- Sits at the top because it governs every buying option below it.
+    farmTab:AddSectionHeader("ลำดับการใช้เงินรวมทุกระบบ")
+    persistentSegmented(
+        farmTab,
+        { "ต่างคนต่างซื้อ", "ถูกสุดก่อน", "แพงสุดก่อน" },
+        { "off", "cheapest", "dearest" },
+        "spendOrder", 1, spendPolicy.SetMode
+    )
 
     persistentToggle(farmTab:AddCard(
         "Auto Mine",

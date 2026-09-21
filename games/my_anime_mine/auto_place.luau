@@ -29,6 +29,7 @@ local parseMoney = import("core/parse_money")
 local gameApi = import("games/my_anime_mine/game_api")(import)
 local log = import("core/logger")
 local runGuarded = import("core/run_job")(import)
+local spendPolicy = import("core/spend_policy")(import)
 
 local checkInterval = 3
 local EMPTY_SLOT_TEXT = "Empty miner slot"
@@ -267,8 +268,9 @@ local function findNextAction()
     end
 
     -- Last, because a new pad is only worth buying once the ones we have
-    -- are full and holding the best miners available.
-    if unlockSlots then
+    -- are full and holding the best miners available. Placing and swapping
+    -- above are free, so only this branch answers to the spend policy.
+    if unlockSlots and spendPolicy.MaySpend("AutoPlace") then
         local money = gameApi.GetMoney()
         for _, pad in ipairs(survey.locked or {}) do
             if pad.price <= money
@@ -351,6 +353,30 @@ end
 
 -- Tells the scheduler whether the plot still needs attention, so Auto Sell
 -- doesn't get a turn until every holder is filled and upgraded.
+-- Only the slot unlock costs money, so that's the only price to report.
+function autoPlace.NextPrice()
+    if not unlockSlots then
+        return nil
+    end
+
+    local survey = (look())
+    if not survey then
+        return nil
+    end
+
+    local money = gameApi.GetMoney()
+    for _, pad in ipairs(survey.locked or {}) do
+        if pad.price <= money
+            and (unlockBudget == 0 or pad.price <= unlockBudget)
+        then
+            -- survey.locked is sorted cheapest first and there is only
+            -- ever one pad worth buying next.
+            return pad.price
+        end
+    end
+    return nil
+end
+
 function autoPlace.HasWork()
     -- A due Equip Best counts as work in its own right. Without this the
     -- scheduler would never grant a turn while the hotbar held nothing

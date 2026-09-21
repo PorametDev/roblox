@@ -26,7 +26,19 @@
 -- Note these still go through the game's own remotes, so any server-side
 -- position checks apply exactly as before - this removes the UI, not the
 -- rules.
+-- Deliberately a singleton, for two reasons. `import` caches the factory
+-- below rather than its result, so each caller would otherwise get a table
+-- of its own: the settings on it (SetProtectUsefulUnits) would apply only
+-- to whichever copy the menu happened to hold, and the game's modules
+-- would be required once per caller instead of once.
+local instance
+
 return function(import)
+
+if instance then
+    return instance
+end
+
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -1130,6 +1142,7 @@ function api.ClaimIndexReward(reward)
     return send(eventName, reward.category, reward.tierKey, reward.index)
 end
 
-return api
+instance = api
+return instance
 
 end

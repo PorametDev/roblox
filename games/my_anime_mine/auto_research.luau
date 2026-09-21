@@ -37,6 +37,7 @@ return function(import)
 local gameApi = import("games/my_anime_mine/game_api")(import)
 local log = import("core/logger")
 local runGuarded = import("core/run_job")(import)
+local spendPolicy = import("core/spend_policy")(import)
 
 local checkInterval = 30
 local maxPerPass = 5
@@ -408,6 +409,34 @@ local lastIdleReport = 0
 -- once the scheduler grants a turn, and the scheduler only grants one when
 -- this returns true. HasWork is the one thing that still runs while the
 -- task is idle, so it is the only place the idle case can be observed.
+-- What this would spend next, for core/spend_policy to compare against
+-- the other buyers. Cheapest or dearest of everything currently buyable.
+function autoResearch.NextPrice(mode)
+    local candidates = {}
+
+    if buyZones then
+        for _, node in ipairs((buyableZoneNodes())) do
+            table.insert(candidates, node.cost)
+        end
+    end
+    if buyCore then
+        for _, node in ipairs(buyableCoreNodes()) do
+            table.insert(candidates, node.cost)
+        end
+    end
+
+    local best = nil
+    for _, cost in ipairs(candidates) do
+        if not best
+            or (mode == "dearest" and cost > best)
+            or (mode ~= "dearest" and cost < best)
+        then
+            best = cost
+        end
+    end
+    return best
+end
+
 function autoResearch.HasWork()
     local zoneNodes = buyZones and buyableZoneNodes() or {}
     local has
@@ -418,6 +447,12 @@ function autoResearch.HasWork()
         has = false
     else
         has = #buyableCoreNodes() > 0
+    end
+
+    -- Everything this task does is a purchase, so the policy gates the
+    -- whole thing rather than any one branch of it.
+    if has and not spendPolicy.MaySpend("AutoResearch") then
+        return false
     end
 
     if not has and enabled then

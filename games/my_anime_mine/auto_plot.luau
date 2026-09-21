@@ -23,6 +23,7 @@ local gameApi = import("games/my_anime_mine/game_api")(import)
 local parseMoney = import("core/parse_money")
 local log = import("core/logger")
 local runGuarded = import("core/run_job")(import)
+local spendPolicy = import("core/spend_policy")(import)
 
 local checkInterval = 30
 local buyNextZone = true
@@ -136,8 +137,28 @@ local function switchToDeepest()
     return false
 end
 
+-- One candidate, so the mode makes no difference to which it is.
+function autoPlot.NextPrice()
+    if not buyNextZone then
+        return nil
+    end
+    local index = nextLockedZone()
+    if not index then
+        return nil
+    end
+    local price = priceOf(index)
+    if price and price > (gameApi.GetMoney() - keepMoney) then
+        return nil
+    end
+    return price
+end
+
 local function tryBuyNextZone()
     if not buyNextZone then
+        return false
+    end
+
+    if not spendPolicy.MaySpend("AutoPlot") then
         return false
     end
 
@@ -205,7 +226,8 @@ function autoPlot.HasWork()
         end
     end
 
-    if buyNextZone then
+    -- Switching zones above is free and never gated; only buying one is.
+    if buyNextZone and spendPolicy.MaySpend("AutoPlot") then
         local index = nextLockedZone()
         if index then
             local price = priceOf(index)

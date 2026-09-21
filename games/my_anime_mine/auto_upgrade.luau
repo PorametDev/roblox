@@ -29,6 +29,7 @@ local gameApi = import("games/my_anime_mine/game_api")(import)
 local teleport = import("core/teleport")
 local log = import("core/logger")
 local runGuarded = import("core/run_job")(import)
+local spendPolicy = import("core/spend_policy")(import)
 
 -- The screen labels these Damage / Speed / Mining; the server wants
 -- Damage / Speed / MineSpeed.
@@ -495,9 +496,16 @@ end
 local function runJob()
     busy = true
 
-    local bought, tooExpensive, maxed = upgradeStats()
+    -- Re-checked here as well as in HasWork: a turn can be granted for
+    -- the free work below while the policy still favours another buyer.
+    local maySpend = spendPolicy.MaySpend("AutoUpgrade")
 
-    if buyPickaxe and enabled and bought < maxPerPass then
+    local bought, tooExpensive, maxed = 0, 0, 0
+    if maySpend then
+        bought, tooExpensive, maxed = upgradeStats()
+    end
+
+    if buyPickaxe and maySpend and enabled and bought < maxPerPass then
         if pickaxeCapReached() then
             if not reportedCap then
                 log("[AutoUpgrade] " .. gameApi.OwnedPickaxeCount()
@@ -532,19 +540,60 @@ local function runJob()
     busy = false
 end
 
+-- What this would spend next: the best stat upgrade it could buy, or the
+-- pickaxe it wants, whichever the policy's mode favours.
+function autoUpgrade.NextPrice(mode)
+    local best = nil
+
+    local function consider(price)
+        if not price then
+            return
+        end
+        if not best
+            or (mode == "dearest" and price > best)
+            or (mode ~= "dearest" and price < best)
+        then
+            best = price
+        end
+    end
+
+    for _, holderKey in ipairs(holderKeys()) do
+        local choice = chooseStat(holderKey)
+        if choice then
+            consider(choice.info.cost)
+        end
+    end
+
+    if buyPickaxe then
+        local pickaxe = findPickaxe()
+        if pickaxe then
+            consider(pickaxe.cost)
+        end
+    end
+
+    return best
+end
+
 -- Skip the turn entirely unless something is genuinely affordable and not
 -- already maxed, so a maxed-out or broke account stops taking turns from
 -- the others - and stops the game printing "already max mining speed" at
 -- the player five times a pass.
 function autoUpgrade.HasWork()
-    for _, holderKey in ipairs(holderKeys()) do
-        if chooseStat(holderKey) then
+    -- Only the two branches that spend money are gated by the policy.
+    -- Handing out pickaxes we already own costs nothing, so it must not
+    -- be held up waiting for its turn to spend.
+    local maySpend = spendPolicy.MaySpend("AutoUpgrade")
+
+    if maySpend then
+        for _, holderKey in ipairs(holderKeys()) do
+            if chooseStat(holderKey) then
+                return true
+            end
+        end
+
+        if buyPickaxe and findPickaxe() then
             return true
         end
-    end
-
-    if buyPickaxe and findPickaxe() then
-        return true
     end
 
     -- "Would equipping change anything?" - and that has to mean the same
