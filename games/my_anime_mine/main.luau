@@ -172,9 +172,11 @@ return function(import)
         5, 300, "autoUpgradeInterval", 20, autoUpgrade.SetInterval, "s")
     persistentSlider(farmTab, "Auto Upgrade: ซื้อสูงสุดต่อรอบ", "กันไม่ให้ใช้เงินหมดในรอบเดียว",
         1, 20, "autoUpgradeMaxPerPass", 5, autoUpgrade.SetMaxPerPass, "x")
+    -- These are preferences: the named stat is bought first when it's
+    -- affordable, and the lowest-level rule applies to the rest.
     persistentSegmented(
         farmTab,
-        { "ต่ำสุดก่อน", "Damage", "Speed", "Mining" },
+        { "ต่ำสุดก่อน", "Damage ก่อน", "Speed ก่อน", "Mining ก่อน" },
         { "lowest", "Damage", "Speed", "MineSpeed" },
         "autoUpgradePriority", 1, autoUpgrade.SetPriority
     )

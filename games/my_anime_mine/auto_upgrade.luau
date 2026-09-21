@@ -36,9 +36,10 @@ local STATS = { "Damage", "Speed", "MineSpeed" }
 
 local checkInterval = 20
 local maxPerPass = 5
--- "lowest" keeps a miner's three stats level with each other; the others
--- pour everything into one, which is what you want when a specific stat is
--- the bottleneck.
+-- "lowest" keeps a miner's three stats level with each other. Naming a
+-- stat instead puts that one first whenever it can be afforded, and falls
+-- back to the lowest-level rule when it can't - a preference, not an
+-- exclusion.
 local priority = "lowest"
 local keepMoney = 0
 local buyPickaxe = true
@@ -146,29 +147,42 @@ local function spendable()
 end
 
 -- Returns the stat to buy next for this holder, or nil plus the reason.
+--
+-- "Priority" is a PREFERENCE, not a filter. It used to mean "buy only
+-- this stat", so picking Damage left a miner at Speed 1/17 and Mining
+-- 1/16 forever: Damage costs $71.4Qi, the other two cost $13Qa and
+-- $45.6Qa, and with $7.1Qi in hand the pass simply bought nothing rather
+-- than buying the two it could afford.
+--
+-- So the favoured stat goes first when it's affordable, and everything
+-- else follows the lowest-level rule behind it.
 local function chooseStat(holderKey)
     local budget = spendable()
     local anyLeft = false
-    local best = nil
+    local preferred = nil
+    local lowest = nil
 
     for _, stat in ipairs(STATS) do
         local info = gameApi.StatInfo(holderKey, stat)
         if info and not info.maxed and info.cost then
             anyLeft = true
             if info.cost <= budget then
-                if priority ~= "lowest" then
-                    if stat == priority then
-                        return { stat = stat, info = info }
-                    end
-                elseif not best or info.level < best.info.level then
-                    best = { stat = stat, info = info }
+                if stat == priority then
+                    preferred = { stat = stat, info = info }
+                end
+                if not lowest or info.level < lowest.info.level then
+                    lowest = { stat = stat, info = info }
                 end
             end
         end
     end
 
-    if best then
-        return best
+    -- Saving up for the favoured stat would be a different feature, and a
+    -- worse one: its price climbs as fast as the others, so waiting means
+    -- never buying anything at all.
+    local choice = preferred or lowest
+    if choice then
+        return choice
     end
     return nil, anyLeft and "cost" or "maxed"
 end
