@@ -2,7 +2,6 @@ return function(import)
 
 local i18n = import("core/i18n")
 local UserInputService = game:GetService("UserInputService")
-local GuiService = game:GetService("GuiService")
 
 -- Theme: ported from S:\emc-pos\packages\core\ires_theme. Default is the
 -- light scheme (white cards on a light grey page); swap these to re-skin
