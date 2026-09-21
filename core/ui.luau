@@ -2,6 +2,7 @@ return function(import)
 
 local i18n = import("core/i18n")
 local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
 
 -- Theme: ported from S:\emc-pos\packages\core\ires_theme. Default is the
 -- light scheme (white cards on a light grey page); swap these to re-skin
@@ -56,8 +57,20 @@ end
 -- never moves past a small threshold, treats it as a tap and fires
 -- `onClick` instead - lets a single element (e.g. the collapsed avatar)
 -- both be dragged and act as a button.
+-- Is `position` (screen space, as InputObject reports it) inside `element`?
+-- AbsolutePosition excludes the top inset, which InputObject.Position
+-- includes, so the inset has to be added back before comparing.
+local function containsPoint(element, position)
+    local inset = GuiService:GetGuiInset()
+    local topLeft = element.AbsolutePosition + inset
+    local size = element.AbsoluteSize
+    return position.X >= topLeft.X and position.X <= topLeft.X + size.X
+        and position.Y >= topLeft.Y and position.Y <= topLeft.Y + size.Y
+end
+
 local function makeDraggable(handle, target, onClick)
     local dragging, dragInput, dragStart, startPos, moved
+    local endConnection
     local connections = {}
 
     table.insert(connections, handle.InputBegan:Connect(function(input)
@@ -66,14 +79,32 @@ local function makeDraggable(handle, target, onClick)
             moved = false
             dragStart = input.Position
             startPos = target.Position
-            table.insert(connections, input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                    if onClick and not moved then
-                        onClick()
-                    end
+
+            -- Only ever one of these alive, and it's dropped the moment it
+            -- fires. Leaving them connected is what made the minimised
+            -- window pop open on a touch anywhere on screen: Roblox
+            -- recycles touch InputObjects, so a stale listener from an
+            -- earlier tap would see End on somebody else's touch, find
+            -- `moved` still false, and call onClick.
+            if endConnection then
+                endConnection:Disconnect()
+            end
+
+            endConnection = input.Changed:Connect(function()
+                if input.UserInputState ~= Enum.UserInputState.End then
+                    return
                 end
-            end))
+
+                endConnection:Disconnect()
+                endConnection = nil
+                dragging = false
+
+                -- A tap counts only if the pointer neither travelled nor
+                -- wandered off the handle it started on.
+                if onClick and not moved and containsPoint(handle, input.Position) then
+                    onClick()
+                end
+            end)
         end
     end))
 
@@ -95,6 +126,16 @@ local function makeDraggable(handle, target, onClick)
             )
         end
     end))
+
+    -- Handed back with the rest so Destroy can drop a tap still in flight.
+    table.insert(connections, {
+        Disconnect = function()
+            if endConnection then
+                endConnection:Disconnect()
+                endConnection = nil
+            end
+        end,
+    })
 
     return connections
 end
