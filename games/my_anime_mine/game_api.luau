@@ -508,6 +508,89 @@ function api.RollMutation(holderKey)
     return send("MineRollMutation", holderKey)
 end
 
+-- One-shot dump of the shapes the automations still read out of GUI text:
+-- a holder record, the hotbar mapping, an inventory character entry, and
+-- what the MineConfig helpers make of a stack key.
+--
+-- Reading numbers off labels has now caused three separate regressions -
+-- "305.2K" parsed as 305.2, four different stacks collapsed into one
+-- damage figure, and a holder's mutation lost entirely - so the remaining
+-- text reads should become state reads. This prints the facts needed to do
+-- that once, instead of another round of guessing at field names.
+local describedShapes = false
+
+function api.DescribeShapes()
+    if describedShapes or not modules() then
+        return
+    end
+    describedShapes = true
+
+    local mine = api.GetMineData()
+    if not mine then
+        log("[GameAPI] shapes: no mine data yet")
+        return
+    end
+
+    local function describe(value)
+        if type(value) ~= "table" then
+            return tostring(value)
+        end
+        local parts = {}
+        for key, item in pairs(value) do
+            table.insert(parts, tostring(key) .. "=" .. tostring(item))
+        end
+        table.sort(parts)
+        return "{" .. table.concat(parts, " ") .. "}"
+    end
+
+    pcall(function()
+        for holderKey, holder in pairs(mine.Holders or {}) do
+            if type(holder) == "table" and holder.CharName then
+                log("[GameAPI] shapes: Holders." .. holderKey .. " " .. describe(holder))
+                log("[GameAPI] shapes:   GetHolderVariant=" ..
+                    tostring(mineConfig.GetHolderVariant(holder))
+                    .. " GetVariantMult=" ..
+                    tostring(mineConfig.GetVariantMult(mineConfig.GetHolderVariant(holder)))
+                    .. " GetHolderDamage=" .. tostring(mineConfig.GetHolderDamage(holder))
+                    .. " GetHolderLevel=" .. tostring(mineConfig.GetHolderLevel(holder)))
+                break
+            end
+        end
+    end)
+
+    pcall(function()
+        local shown = 0
+        for slot, key in pairs(mine.Hotbar or {}) do
+            log("[GameAPI] shapes: Hotbar[" .. tostring(slot) .. "] = " .. tostring(key)
+                .. " ParseCharStack=" .. tostring(mineConfig.ParseCharStack(key)))
+            shown = shown + 1
+            if shown >= 3 then
+                break
+            end
+        end
+        if shown == 0 then
+            log("[GameAPI] shapes: Hotbar is empty")
+        end
+    end)
+
+    pcall(function()
+        local entries = mineInventory.Collect(mine, "All", mineInventory.KindOrder.OreFirst)
+        local shown = 0
+        for _, entry in pairs(entries or {}) do
+            if entry.Kind == "Character" then
+                log("[GameAPI] shapes: inventory entry " .. describe(entry))
+                shown = shown + 1
+                if shown >= 2 then
+                    break
+                end
+            end
+        end
+        if shown == 0 then
+            log("[GameAPI] shapes: no Character entries in the inventory")
+        end
+    end)
+end
+
 -- Every pickaxe we can actually put on a miner, strongest first, one entry
 -- per copy owned.
 --

@@ -341,6 +341,14 @@ return function(import)
         0, 500, "autoPlotKeepMoney", 0,
         function(value) autoPlot.SetKeepMoney(value * 1e6) end, "M")
 
+    -- Dev only, once: prints the real shape of the holder, hotbar and
+    -- inventory records so the automations that still read GUI text can be
+    -- moved onto state instead. Delayed because the game's modules aren't
+    -- answering yet at load.
+    if buildEnv.IsDev then
+        task.delay(8, gameApi.DescribeShapes)
+    end
+
     -- The debug tab is built by core/debug_tab and only when this is a dev
     -- build. In a prod bundle scripts/build.py leaves every core/debug_*
     -- module out of the output entirely, so this import has to stay inside
