@@ -927,6 +927,41 @@ function api.HolderBaseDamage(holderKey)
         return nil
     end
 
+    -- Derived by dividing the level and pickaxe back out of the holder's
+    -- real damage, rather than rebuilt from the character name.
+    --
+    -- MineSlotFocusClient computes a holder's damage as
+    --     base x pickaxe x level x variant x enchant
+    -- so dividing by the two transferable factors leaves base x variant x
+    -- enchant, which is what a hotbar card shows.
+    --
+    -- Multiplying base by GetVariantMult(GetHolderVariant(...)) was meant
+    -- to do the same and didn't: it came back 1 for every holder, so a
+    -- Whale Island Kid worth 74.4B read as its bare 7.6B base. Auto Place
+    -- then swapped the 74.4B stack in, measured 7.6B, decided it still
+    -- needed upgrading, and did it again - the swap loop in the log.
+    local derived = nil
+    pcall(function()
+        local shown = tonumber(mineConfig.GetHolderDamage(holder))
+        if not shown or shown <= 0 then
+            return
+        end
+
+        local levelMult = tonumber(mineConfig.GetCharacterLevelMultiplier(
+            mineConfig.GetHolderLevel(holder))) or 1
+        local pickaxe = mineConfig.GetHolderPickaxe(holder)
+        local pickMult = tonumber(pickaxe and pickaxe.Multiplier) or 1
+
+        if levelMult > 0 and pickMult > 0 then
+            derived = shown / (levelMult * pickMult)
+        end
+    end)
+
+    if derived and derived > 0 then
+        return derived
+    end
+
+    -- Fallback for when GetHolderDamage isn't available.
     local base = api.CharacterBaseDamage(holder.CharName)
     if not base then
         return nil

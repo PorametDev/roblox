@@ -67,16 +67,38 @@ end
 
 -- The billboard over a placed miner reads name / "Level 1" / rarity /
 -- power. Only the power is a bare number, so that's what to match.
+local POWER_SUFFIXES = {
+    K = 1e3, M = 1e6, B = 1e9, T = 1e12, Qa = 1e15, Qi = 1e18,
+}
+
 local function readPlacedPower(holder)
     for _, descendant in ipairs(holder:GetDescendants()) do
         if descendant:IsA("TextLabel") then
-            local digits = descendant.Text:match("^([%d,]+)$")
+            -- "869.8B" as well as "12,012". Matching bare digits only meant
+            -- every abbreviated billboard read as nothing, which is why the
+            -- survey line logged a power of 0 for every holder.
+            local digits, suffix = descendant.Text:match("^([%d,%.]+)%s*(%a*)$")
             if digits then
-                return tonumber((digits:gsub(",", "")))
+                local value = tonumber((digits:gsub(",", "")))
+                if value then
+                    if suffix ~= "" then
+                        value = value * (POWER_SUFFIXES[suffix]
+                            or POWER_SUFFIXES[suffix:sub(1, 1):upper() .. suffix:sub(2)]
+                            or 1)
+                    end
+                    return value
+                end
             end
         end
     end
     return nil
+end
+
+-- The prompt reads "Swap out <name>" while we're holding something, so the
+-- bare name has to be recovered before it can be looked up.
+local function promptCharName(prompt)
+    local text = prompt.ObjectText or ""
+    return (text:gsub("^Swap out ", ""))
 end
 
 -- Walking up to an unbought slot shows "Locked miner slot / Unlock", so the
@@ -151,6 +173,9 @@ local function firePrompt(prompt)
 end
 
 local lastSurvey = nil
+-- holder name -> tick() before which we won't try to upgrade it again.
+local swapCooldown = {}
+local SWAP_COOLDOWN = 120
 
 -- Surveys every holder once: which are free to fill, and which are holding
 -- something weak enough to be worth swapping out.
@@ -195,14 +220,14 @@ local function surveyHolders()
                 -- comparable. Levels are bought; the character isn't.
                 local shown = readPlacedPower(holder) or 0
                 local base = gameApi.HolderBaseDamage(holder.Name)
-                    or gameApi.CharacterBaseDamage(prompt.ObjectText)
+                    or gameApi.CharacterBaseDamage(promptCharName(prompt))
                     or shown
                 table.insert(summary, holder.Name .. "=" .. prompt.ObjectText
                     .. "(" .. shown .. ", base " .. math.floor(base) .. ")")
                 table.insert(occupied, {
                     holder = holder,
                     prompt = prompt,
-                    name = prompt.ObjectText,
+                    name = promptCharName(prompt),
                     power = base,
                     shown = shown,
                 })
@@ -262,7 +287,19 @@ local function findNextAction()
         return "fill", survey.empty[1], candidates[1]
     end
 
-    local weakest = upgradeWeakMiners and survey.occupied[1] or nil
+    -- A swap that measured no improvement benches that holder for a while,
+    -- so one bad reading can't become an endless pick-up-and-put-back.
+    local weakest = nil
+    if upgradeWeakMiners then
+        local now = tick()
+        for _, entry in ipairs(survey.occupied) do
+            if (swapCooldown[entry.holder.Name] or 0) <= now then
+                weakest = entry
+                break
+            end
+        end
+    end
+
     if weakest and candidates[1].power > weakest.power then
         return "upgrade", weakest, candidates[1]
     end
@@ -531,6 +568,9 @@ end
 local function runUpgradeJob(target)
     busy = true
 
+    local holderName = target.holder.Name
+    local before = target.power
+
     if goTo(target.prompt) and pickUp(target) then
         -- The picked-up miner lands back in the hotbar, so re-read it
         -- before choosing what goes in - placeBest does that itself.
@@ -539,6 +579,22 @@ local function runUpgradeJob(target)
 
     teleport.Return()
     cachedAt = 0
+
+    -- Did that actually help? If the holder measures no better than before,
+    -- stop picking at it. Without this one bad reading is an infinite
+    -- loop: the log has M3 picked up and put back every second for
+    -- minutes, because whatever was placed always measured the same as
+    -- what had just been removed.
+    local after = gameApi.HolderBaseDamage(holderName)
+    if after and before and after <= before then
+        swapCooldown[holderName] = tick() + SWAP_COOLDOWN
+        log("[AutoPlace] " .. holderName .. " is no better after the swap ("
+            .. string.format("%.3g", before) .. " -> " .. string.format("%.3g", after)
+            .. ") - leaving it alone for " .. SWAP_COOLDOWN .. "s")
+    else
+        swapCooldown[holderName] = nil
+    end
+
     busy = false
 end
 
