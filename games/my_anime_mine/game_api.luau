@@ -48,6 +48,8 @@ local api = {}
 -- Never sell a character good enough to be worth placing. Off would mean
 -- reverting to the behaviour that sold the best unit in the inventory.
 local protectUsefulUnits = true
+-- One line, once a session.
+local reportedHolderShape = false
 local gameState, mineInventory, mineConfig, mineStock, items, indexRewards
 local loadFailed = false
 
@@ -959,6 +961,21 @@ function api.HolderBaseDamage(holderKey)
 
     if derived and derived > 0 then
         return derived
+    end
+
+    -- Both routes to a holder's mutation have now failed - GetVariantMult
+    -- returns 1 and dividing GetHolderDamage gives the bare base - so say
+    -- once what a holder record actually contains. Auto Place works around
+    -- this by remembering what it placed; this is so the underlying field
+    -- can be found and used properly.
+    if not reportedHolderShape then
+        reportedHolderShape = true
+        local fields = {}
+        for key, value in pairs(holder) do
+            table.insert(fields, tostring(key) .. "=" .. tostring(value))
+        end
+        table.sort(fields)
+        log("[GameAPI] holder " .. holderKey .. " fields: " .. table.concat(fields, " "))
     end
 
     -- Fallback for when GetHolderDamage isn't available.

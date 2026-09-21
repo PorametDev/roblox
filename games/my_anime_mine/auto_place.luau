@@ -177,6 +177,22 @@ local lastSurvey = nil
 local swapCooldown = {}
 local SWAP_COOLDOWN = 120
 
+-- holder name -> { name, power } of what WE put there.
+--
+-- The game's own numbers can't tell two stacks of the same character
+-- apart on a holder: a 300.4B Awakened Gojou and a 19.1B one both read
+-- back as the bare 19.1B base, because neither GetVariantMult nor
+-- dividing the level and pickaxe out of GetHolderDamage recovers the
+-- mutation. That made the placed unit look unchanged, so it was swapped
+-- again, and again.
+--
+-- But Auto Place did the placing, so it already knows exactly which stack
+-- went in and what the hotbar said it was worth. Remembering that is both
+-- simpler and more accurate than any amount of introspection - and it is
+-- trusted only while the character name still matches, so a swap made by
+-- hand falls back to the game's figure.
+local placedByUs = {}
+
 -- Surveys every holder once: which are free to fill, and which are holding
 -- something weak enough to be worth swapping out.
 local function surveyHolders()
@@ -219,9 +235,17 @@ local function surveyHolders()
                 -- the same basis the hotbar cards use, so the two are
                 -- comparable. Levels are bought; the character isn't.
                 local shown = readPlacedPower(holder) or 0
-                local base = gameApi.HolderBaseDamage(holder.Name)
-                    or gameApi.CharacterBaseDamage(promptCharName(prompt))
-                    or shown
+                local charName = promptCharName(prompt)
+
+                local base
+                local remembered = placedByUs[holder.Name]
+                if remembered and remembered.name == charName then
+                    base = remembered.power
+                else
+                    base = gameApi.HolderBaseDamage(holder.Name)
+                        or gameApi.CharacterBaseDamage(charName)
+                        or shown
+                end
                 table.insert(summary, holder.Name .. "=" .. prompt.ObjectText
                     .. "(" .. shown .. ", base " .. math.floor(base) .. ")")
                 table.insert(occupied, {
@@ -510,6 +534,7 @@ local function placeBest(holder, prompt)
         return false
     end
 
+    placedByUs[holder.Name] = { name = miner.name, power = miner.power }
     log("[AutoPlace] placed " .. miner.name .. " (power " .. miner.power
         .. ") on " .. holder.Name)
     return true
@@ -570,6 +595,7 @@ local function runUpgradeJob(target)
 
     local holderName = target.holder.Name
     local before = target.power
+    placedByUs[holderName] = nil
 
     if goTo(target.prompt) and pickUp(target) then
         -- The picked-up miner lands back in the hotbar, so re-read it
@@ -585,7 +611,8 @@ local function runUpgradeJob(target)
     -- loop: the log has M3 picked up and put back every second for
     -- minutes, because whatever was placed always measured the same as
     -- what had just been removed.
-    local after = gameApi.HolderBaseDamage(holderName)
+    local remembered = placedByUs[holderName]
+    local after = remembered and remembered.power or gameApi.HolderBaseDamage(holderName)
     if after and before and after <= before then
         swapCooldown[holderName] = tick() + SWAP_COOLDOWN
         log("[AutoPlace] " .. holderName .. " is no better after the swap ("
