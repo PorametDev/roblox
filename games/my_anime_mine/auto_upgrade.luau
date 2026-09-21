@@ -370,64 +370,82 @@ end
 -- matter: MineGame.Pickaxes stores a count, so owning two of the same
 -- pickaxe really does let two miners hold it, and the unit screen's
 -- wornBy() exists precisely to show that.
-local function equipPickaxesBestFirst()
-    local pool = {}
-    for _, pickaxe in ipairs(gameApi.GetPickaxes()) do
-        for _ = 1, pickaxe.ownedCount do
-            table.insert(pool, pickaxe)
-        end
+-- Holders paired with the pickaxe each should be wearing, strongest with
+-- strongest. Shared so HasWork and the job can never disagree about what
+-- "already correct" means - they did, and the job simply never ran.
+local function plannedPickaxes()
+    local pool = gameApi.OwnedPickaxePool()
+    local keys = holderKeys()
+    if #pool == 0 or #keys == 0 then
+        return {}
     end
 
-    if #pool == 0 then
-        return
-    end
-
-    -- By Multiplier, not Cost: a later zone's cheap pickaxe can beat an
-    -- earlier zone's expensive one.
-    table.sort(pool, function(a, b)
-        if a.multiplier ~= b.multiplier then
-            return a.multiplier > b.multiplier
+    table.sort(keys, function(a, b)
+        local da = gameApi.HolderBaseDamage(a) or 0
+        local db = gameApi.HolderBaseDamage(b) or 0
+        if da ~= db then
+            return da > db
         end
-        return a.name < b.name
+        return a < b
     end)
 
-    local keys = holderKeys()
-
-    -- Anything already correctly placed is left alone and its copy taken
-    -- out of the pool, so a full pass with nothing to change sends nothing.
-    local remaining = {}
-    local settled = {}
-    local current = holders()
-
-    for _, pickaxe in ipairs(pool) do
-        local claimed = false
-        for _, holderKey in ipairs(keys) do
-            local entry = current[holderKey]
-            if not settled[holderKey] and entry and entry.Pickaxe == pickaxe.name then
-                settled[holderKey] = true
-                claimed = true
-                break
-            end
+    local plan = {}
+    for position, holderKey in ipairs(keys) do
+        local wanted = pool[position]
+        if not wanted then
+            break
         end
-        if not claimed then
-            table.insert(remaining, pickaxe)
+        table.insert(plan, { holderKey = holderKey, pickaxe = wanted })
+    end
+    return plan
+end
+
+local function pickaxeAssignmentPending()
+    local current = holders()
+    for _, step in ipairs(plannedPickaxes()) do
+        local entry = current[step.holderKey]
+        if (entry and entry.Pickaxe or nil) ~= step.pickaxe.name then
+            return true
         end
     end
+    return false
+end
 
-    local nextSpare = 1
-    for _, holderKey in ipairs(keys) do
-        if not settled[holderKey] then
-            local wanted = remaining[nextSpare]
-            if not wanted then
-                break
-            end
-            nextSpare = nextSpare + 1
+-- Give the strongest pickaxe to the strongest miner, one copy each.
+--
+-- The previous version marked a holder "settled" if it wore ANY pickaxe we
+-- owned, took that copy out of the pool, and never looked at it again. So
+-- a miner wearing an Iron stayed on Iron indefinitely while eighty-five
+-- Sapphires sat unused - which is exactly what the unit screen showed.
+-- "Already wearing something we own" is not the same question as "already
+-- wearing the best one available", and only the second one matters.
+--
+-- Pairing best-with-best rather than handing them out in holder order:
+-- the pickaxe is a multiplier on the character's damage, so the same
+-- pickaxe is worth more on a stronger miner.
+local function equipPickaxesBestFirst()
+    local current = holders()
 
-            local entry = current[holderKey]
+    for _, step in ipairs(plannedPickaxes()) do
+        local holderKey, wanted = step.holderKey, step.pickaxe
+        local entry = current[holderKey]
+        local worn = entry and entry.Pickaxe or nil
+
+        if worn ~= wanted.name then
             gameApi.EquipPickaxe(holderKey, wanted.name)
-            log("[AutoUpgrade] " .. holderKey .. " pickaxe "
-                .. tostring(entry and entry.Pickaxe or "none") .. " -> " .. wanted.name)
             task.wait(0.3)
+
+            -- Confirm rather than assume: the server can refuse, and a
+            -- silent refusal here is how this went unnoticed all night.
+            local after = holders()[holderKey]
+            local nowWorn = after and after.Pickaxe or nil
+            if nowWorn == wanted.name then
+                log("[AutoUpgrade] " .. holderKey .. " pickaxe "
+                    .. tostring(worn or "none") .. " -> " .. wanted.name)
+            else
+                log("[AutoUpgrade] " .. holderKey .. " wouldn't take "
+                    .. wanted.name .. " (still " .. tostring(nowWorn or "none") .. ")")
+            end
         end
     end
 end
@@ -515,24 +533,12 @@ function autoUpgrade.HasWork()
         return true
     end
 
-    -- "Would equipping change anything?" rather than "is equipping on?" -
-    -- the latter meant every interval claimed a turn forever.
-    if equipPickaxes then
-        local owned = 0
-        for _, pickaxe in ipairs(gameApi.GetPickaxes()) do
-            owned = owned + pickaxe.ownedCount
-        end
-        if owned > 0 then
-            local wearing = 0
-            for _, entry in pairs(holders()) do
-                if type(entry) == "table" and entry.Pickaxe and entry.Pickaxe ~= "" then
-                    wearing = wearing + 1
-                end
-            end
-            if wearing < math.min(owned, #holderKeys()) then
-                return true
-            end
-        end
+    -- "Would equipping change anything?" - and that has to mean the same
+    -- pairing the job itself would make. Counting how many miners wear
+    -- SOMETHING said no while a miner on an Iron had eighty-five Sapphires
+    -- going spare, so the job was never given a turn to fix it.
+    if equipPickaxes and pickaxeAssignmentPending() then
+        return true
     end
 
     if rollMutations then

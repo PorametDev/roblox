@@ -494,6 +494,54 @@ function api.RollMutation(holderKey)
     return send("MineRollMutation", holderKey)
 end
 
+-- Every pickaxe we can actually put on a miner, strongest first, one entry
+-- per copy owned.
+--
+-- GetPickaxes deliberately lists only what the SHOP will sell for cash, so
+-- it hides the free starter pickaxes and the Robux ones. That's right for
+-- buying and wrong for equipping: a pickaxe you were given still works.
+function api.OwnedPickaxePool()
+    if not modules() then
+        return {}
+    end
+
+    local mine = api.GetMineData()
+    local owned = (mine and mine.Pickaxes) or {}
+    local pool = {}
+
+    pcall(function()
+        for index, def in ipairs(mineConfig.Pickaxes) do
+            local count = math.floor(tonumber(owned[def.Name]) or 0)
+
+            -- Free ones are always available and never appear in the owned
+            -- table, but they're the weakest, so they can only ever end up
+            -- as filler once the real ones run out.
+            local free = mineConfig.IsPickaxeFree(def) and true or false
+            if free and count <= 0 then
+                count = api.MaxMinerSlots()
+            end
+
+            for _ = 1, count do
+                table.insert(pool, {
+                    index = index,
+                    name = def.Name,
+                    multiplier = tonumber(def.Multiplier) or 1,
+                    free = free,
+                })
+            end
+        end
+    end)
+
+    table.sort(pool, function(a, b)
+        if a.multiplier ~= b.multiplier then
+            return a.multiplier > b.multiplier
+        end
+        return a.name < b.name
+    end)
+
+    return pool
+end
+
 -- Highest cost among the ones we own: cost tracks quality here too.
 function api.BestOwnedPickaxe()
     local best = nil
