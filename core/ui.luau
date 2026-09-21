@@ -57,26 +57,23 @@ end
 -- never moves past a small threshold, treats it as a tap and fires
 -- `onClick` instead - lets a single element (e.g. the collapsed avatar)
 -- both be dragged and act as a button.
--- Is `position` (screen space, as InputObject reports it) inside `element`?
--- AbsolutePosition excludes the top inset, which InputObject.Position
--- includes, so the inset has to be added back before comparing.
-local function containsPoint(element, position)
-    local inset = GuiService:GetGuiInset()
-    local topLeft = element.AbsolutePosition + inset
-    local size = element.AbsoluteSize
-    return position.X >= topLeft.X and position.X <= topLeft.X + size.X
-        and position.Y >= topLeft.Y and position.Y <= topLeft.Y + size.Y
-end
-
-local function makeDraggable(handle, target, onClick)
-    local dragging, dragInput, dragStart, startPos, moved
+-- Returns its connections plus a small state table whose `moved` field
+-- says whether the last gesture was a drag. Callers that want tap
+-- behaviour bind the handle's own Activated signal and consult that,
+-- rather than this trying to work out what counts as a tap itself:
+-- deciding "did the pointer end inside this element" by hand means
+-- guessing how AbsolutePosition relates to the topbar inset, and guessing
+-- wrong made the minimised window impossible to reopen.
+local function makeDraggable(handle, target)
+    local dragging, dragInput, dragStart, startPos
+    local state = { moved = false }
     local endConnection
     local connections = {}
 
     table.insert(connections, handle.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
-            moved = false
+            state.moved = false
             dragStart = input.Position
             startPos = target.Position
 
@@ -98,12 +95,6 @@ local function makeDraggable(handle, target, onClick)
                 endConnection:Disconnect()
                 endConnection = nil
                 dragging = false
-
-                -- A tap counts only if the pointer neither travelled nor
-                -- wandered off the handle it started on.
-                if onClick and not moved and containsPoint(handle, input.Position) then
-                    onClick()
-                end
             end)
         end
     end))
@@ -118,7 +109,7 @@ local function makeDraggable(handle, target, onClick)
         if input == dragInput and dragging then
             local delta = input.Position - dragStart
             if delta.Magnitude > 3 then
-                moved = true
+                state.moved = true
             end
             target.Position = UDim2.new(
                 startPos.X.Scale, startPos.X.Offset + delta.X,
@@ -137,7 +128,7 @@ local function makeDraggable(handle, target, onClick)
         end,
     })
 
-    return connections
+    return connections, state
 end
 
 local UI = {}
@@ -680,14 +671,23 @@ local function createWindow(config)
     local connections = makeDraggable(main, main)
 
     -- The collapsed state's only visible/interactive element: drag it like
-    -- the rest of the window, but a plain tap (no movement) restores it.
-    for _, connection in ipairs(makeDraggable(avatar, main, function()
-        if minimized then
-            setMinimized(false)
-        end
-    end)) do
+    -- the rest of the window, and tap it to restore.
+    --
+    -- The tap is the avatar's own Activated signal, because it's a
+    -- TextButton and Roblox already hit-tests it correctly - including the
+    -- topbar inset, the window's UIScale, and anything overlapping it. The
+    -- `moved` check is all this has to add, so that finishing a drag on
+    -- the icon doesn't also count as pressing it.
+    local avatarConnections, avatarDrag = makeDraggable(avatar, main)
+    for _, connection in ipairs(avatarConnections) do
         table.insert(connections, connection)
     end
+
+    table.insert(connections, avatar.Activated:Connect(function()
+        if minimized and not avatarDrag.moved then
+            setMinimized(false)
+        end
+    end))
 
     local self = setmetatable({}, UI)
     self.ScreenGui = screenGui
